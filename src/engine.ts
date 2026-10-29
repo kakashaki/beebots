@@ -479,10 +479,16 @@ export class Engine {
         .prepare(`SELECT inst_id AS instId, side, contracts FROM orders WHERE bee = ? AND reduce_only = 0 AND state = 'filled' ORDER BY id DESC LIMIT 1`)
         .get(id) as { instId: string; side: "buy" | "sell"; contracts: number } | undefined;
       if (!last) continue;
+      const side = last.side === "buy" ? "long" : "short";
+      const mid = this.d.feed.view().stats.get(last.instId)?.mid;
+      if (mid === undefined || this.brain(id).stopFor(last.instId, side, mid, this.ctx(id, now)) === null) {
+        log.warn("resume skipped: no stop loss can be computed for it", { bee: id, instId: last.instId });
+        continue;
+      }
       const decisionId = this.d.db.insertDecision({
         bee: id, ts: now, stateHash: "", stateJson: "{}", menuJson: "[]", choice: null, probabilities: null, confidence: null,
         conviction: null, latencyMs: null, inputTokens: null, jevCostUsd: 0, jevError: null,
-        action: { kind: "open", instId: last.instId, side: last.side === "buy" ? "long" : "short" }, vetoedBy: null, forcedBy: "resume_last",
+        action: { kind: "open", instId: last.instId, side }, vetoedBy: null, forcedBy: "resume_last",
         status: "benched: back into its last position to ride it",
       });
       const ok = await this.order(id, decisionId, last.instId, last.side, last.contracts, false, "resume_last");
@@ -664,13 +670,22 @@ export class Engine {
       log.info("order rounds to zero contracts, skipped", { bee: id, coin: inst.coin, notionalUsd });
       return;
     }
+    // No stop, no trade: a gap in the market data (no ATR or trend yet) leaves the brain unable to place one, and the
+    // risk layer only fires stops it has. Checked before the order, at today's mid.
+    const preStop = this.brain(id).stopFor(instId, side, s.mid, this.ctx(id, this.now()));
+    if (preStop === null) {
+      log.warn("open skipped: no stop loss can be computed for it", { bee: id, coin: inst.coin, side });
+      this.d.bus.emit("status", { event: "open_skipped_no_stop", bee: id, coin: inst.coin }, this.now());
+      return;
+    }
     const ok = await this.order(id, decisionId, instId, side === "long" ? "buy" : "sell", contracts, false, "open");
     const bee = this.bees[id];
     if (!ok || !bee.position) return;
     bee.tradesToday++;
     const ctx = this.ctx(id, this.now());
     const p = bee.position;
-    p.stopPx = this.brain(id).stopFor(instId, side, p.entryPx, ctx);
+    // Re-placed from the real fill price; the pre-trade stop (same distance from the mid) stands in if that fails.
+    p.stopPx = this.brain(id).stopFor(instId, side, p.entryPx, ctx) ?? preStop + (p.entryPx - s.mid);
     p.initialStopPx = p.stopPx;
     const notional = positionNotional(p, p.entryPx, inst.ctVal);
     p.riskUsd = p.stopPx !== null ? (notional * Math.abs(p.entryPx - p.stopPx)) / p.entryPx : notional * 0.01;

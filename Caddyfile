@@ -1,5 +1,13 @@
-# beebots: SITE_ADDRESS is PUBLIC_DOMAIN when set (Caddy gets the HTTPS certificate itself), otherwise :80 (plain HTTP on any address).
-{$SITE_ADDRESS::80} {
+# beebots: always HTTPS. With PUBLIC_DOMAIN set (SITE_ADDRESS), Caddy gets a real certificate for it. Without one, the
+# server's IP address gets a certificate from Caddy's own internal authority: the browser warns once that it does not
+# know who signed it, but the owner password and keys never cross the network in the clear. Plain HTTP only redirects.
+{
+	# Caddy's internal authority would try to add its root to the system trust store; the container cannot (and
+	# visitors' browsers would not see it anyway).
+	skip_install_trust
+}
+
+(beebots) {
 	encode zstd gzip
 
 	# Read-only engine endpoints. Only GET is proxied; the engine refuses everything else too.
@@ -70,5 +78,45 @@
 		X-Frame-Options SAMEORIGIN
 		Referrer-Policy strict-origin-when-cross-origin
 		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; media-src 'self' data: blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+	}
+}
+
+# The domain, when there is one (localhost otherwise, which is harmless).
+{$SITE_ADDRESS:localhost} {
+	import beebots
+}
+
+# Any other name, usually the server's bare IP address: HTTPS with an internal certificate, made on the first visit.
+:443 {
+	tls internal {
+		on_demand
+	}
+	import beebots
+}
+
+# Plain HTTP never serves the app or takes a password or key: it sends visitors to the same address over HTTPS.
+# The one exception is the Beekeeper's Zap (docs/BEEKEEPER.md) on a server with no domain: Zapier refuses an internal
+# certificate, so it reads the public scorecard and delivers rewrites signed with a 15-minute round key over plain HTTP,
+# as before. Neither carries a secret.
+http:// {
+	@zapRead {
+		method GET
+		path /keeper/scorecard
+	}
+	handle @zapRead {
+		reverse_proxy engine:8080
+	}
+	@zapWrite {
+		method POST
+		path /lab/*
+	}
+	handle @zapWrite {
+		request_body {
+			max_size 16KB
+		}
+		reverse_proxy engine:8080
+	}
+	handle {
+		redir https://{host}{uri} permanent
 	}
 }

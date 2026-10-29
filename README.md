@@ -43,9 +43,12 @@ Use code **MAGIC10** at checkout for 10% off.
 
 1. Click the button, pick a VPS plan (a **KVM 2** is plenty) and check out. Hostinger sets up Docker and starts
    beebots for you.
-2. Open your server's IP address in a browser. You'll see the **Setup** page. Do this soon: Setup stays open for
-   2 hours after the server starts (see [Setup safety](#setup-safety)).
+2. Open `https://<your-server-ip>/` in a browser. It warns once about the certificate (Caddy made it itself; see
+   [Setup safety](#setup-safety)): carry on to the site. You'll see the **Setup** page. Do this soon: Setup stays
+   open for 2 hours after the server starts.
 3. On Setup:
+   - enter the **setup code** from the engine's log: Hostinger **Docker Manager** → the `beebots` project → the
+     `engine` container's logs, on the line that says `setup is open`
    - tick the three risk statements
    - pick an **owner password** (8+ characters). Your dashboard is public; the password is what lets *you* change
      things from it later, like joining or leaving the Hive. Write it down.
@@ -65,16 +68,20 @@ Use code **MAGIC10** at checkout for 10% off.
 
 ### Setup safety
 
-Setup has no code to find: the page is open to whoever reaches the server first. So:
+The Setup page is public, so reaching it first is not enough to take your server:
 
-- **First come, first served.** Once you press Start, Setup closes for good. Nobody else can change your keys or bees.
+- **A setup code.** Setup asks for a code the engine prints to its log when it starts: Hostinger **Docker Manager** →
+  the `engine` container's logs, or `docker compose logs engine`, on the line that says `setup is open`. Each restart
+  prints a new one. Ten wrong codes and that visitor is refused until the next restart.
+- **Once saved, closed.** Once you press Start, Setup closes for good. Nobody else can change your keys or bees.
 - **A setup window.** If nobody finishes Setup within 2 hours of the engine starting (`SETUP_WINDOW_MIN`, default
   120), it locks, and the page says so. Restart the engine to open it again: Hostinger **Docker Manager** → the
   `beebots` project → **Restart** on the `engine` container, or `docker compose restart engine`.
-- **Caps** on the calls that cost money (designs and portraits), in total and per visitor.
+- **Caps** on the calls that cost money (designs and portraits) and on save attempts, in total and per visitor.
 
-Set up right after deploying, and use a domain with HTTPS if you can (`PUBLIC_DOMAIN`, below) so your keys don't
-travel over plain HTTP.
+The page is always HTTPS. Without a domain, your browser warns once that it doesn't know who signed the server's
+certificate (Caddy made it itself); your keys are still encrypted. With a domain (`PUBLIC_DOMAIN`, below) there's no
+warning.
 
 Each bee gets its own portrait, painted in the same style as the originals:
 
@@ -95,7 +102,8 @@ curl -fsSLO https://raw.githubusercontent.com/imikerussell/beebots/main/docker-c
 docker compose up -d
 ```
 
-Then open `http://<your-server-ip>/`.
+Then open `https://<your-server-ip>/` (your browser warns once about the certificate: see [Setup safety](#setup-safety)),
+and have `docker compose logs engine` handy for the setup code.
 
 ### Updating
 
@@ -326,7 +334,7 @@ in [`.env.example`](.env.example). The common ones:
 
 | setting | default | what it does |
 |---|---|---|
-| `PUBLIC_DOMAIN` | blank | A domain pointed at your server. Caddy then gets an HTTPS certificate on its own. **Recommended**: without it, the Setup page and your keys travel over plain HTTP. |
+| `PUBLIC_DOMAIN` | blank | A domain pointed at your server. Caddy then gets a real HTTPS certificate on its own. **Recommended**: without it, the server's IP gets Caddy's own certificate, and browsers warn about it. |
 | `GEMINI_API_KEY` | blank | Runs the bees on Gemini 4 Argon (see [Run it with Gemini 4 Argon](#run-it-with-gemini-4-argon)). |
 | `GEMINI_DAILY_USD_CAP` | `3` | Daily cap on Gemini spend as the engine counts it; each call's worst case is reserved before it is sent. When there is no room, the code chooser answers until 00:00 UTC. |
 | `TICK_MS` | `10000` | How often each bee is looked at, and how often it asks Jev. Faster is more exciting and costs more with Jev (see [docs/COSTS.md](docs/COSTS.md)). Gemini is paced by `GEMINI_MIN_INTERVAL_MS`. |

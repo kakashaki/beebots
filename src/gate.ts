@@ -1,12 +1,16 @@
 // The owner password: picked on the Setup page, stored only as a salted scrypt hash, and required for every write from
-// the public dashboard (joining or leaving the Hive). Wrong passwords are counted; too many and the gate locks for a
-// while, so it cannot be guessed from the page.
+// the public dashboard (joining or leaving the Hive). Wrong passwords are counted per client address; too many and the
+// gate locks for that address for a while, so it cannot be guessed from the page, and a stranger guessing cannot lock
+// the owner out.
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { log } from "./log.js";
+import { clientAddr } from "./visitors.js";
 
 const MAX_BAD = 8;
 const LOCKOUT_MS = 15 * 60_000;
+/** Addresses with wrong tries remembered at once; past this the oldest unlocked ones are forgotten. */
+const MAX_ADDRS = 10_000;
 export const MIN_PASSWORD = 8;
 export const MAX_PASSWORD = 200;
 
@@ -39,8 +43,7 @@ export function verifyPassword(password: string, stored: string): boolean {
 }
 
 export class PasswordGate {
-  private bad = 0;
-  private lockedUntil = 0;
+  private tries = new Map<string, { bad: number; lockedUntil: number }>();
 
   /** `hash` is read on every check (null = no owner password set). `what` names the gate in the lockout log line. */
   constructor(
@@ -50,8 +53,9 @@ export class PasswordGate {
     private now: () => number = Date.now,
   ) {}
 
-  get locked(): boolean {
-    return this.now() < this.lockedUntil;
+  /** Whether this request's client address is locked out. */
+  lockedFor(req: IncomingMessage): boolean {
+    return this.now() < (this.tries.get(addrOf(req))?.lockedUntil ?? 0);
   }
 
   get set(): boolean {
@@ -59,7 +63,8 @@ export class PasswordGate {
   }
 
   check(req: IncomingMessage): "ok" | "bad" | "locked" | "unset" {
-    if (this.locked) return "locked";
+    const addr = addrOf(req);
+    if (this.lockedFor(req)) return "locked";
     const h = this.hash();
     if (!h) return "unset";
     const given = String(req.headers[this.header] ?? "");
@@ -71,17 +76,32 @@ export class PasswordGate {
       /* not encoded: use as is */
     }
     if (pw.length >= MIN_PASSWORD && pw.length <= MAX_PASSWORD && verifyPassword(pw, h)) {
-      this.bad = 0;
+      this.tries.delete(addr);
       return "ok";
     }
-    if (++this.bad >= MAX_BAD) {
-      this.bad = 0;
-      this.lockedUntil = this.now() + LOCKOUT_MS;
-      log.warn(`${this.what} locked for 15 minutes after repeated wrong passwords`);
+    const t = this.tries.get(addr) ?? this.remember(addr);
+    if (++t.bad >= MAX_BAD) {
+      t.bad = 0;
+      t.lockedUntil = this.now() + LOCKOUT_MS;
+      log.warn(`${this.what} locked for 15 minutes for one address after repeated wrong passwords`);
     }
     return "bad";
   }
+
+  private remember(addr: string) {
+    if (this.tries.size >= MAX_ADDRS) {
+      const now = this.now();
+      for (const [a, t] of this.tries) if (t.lockedUntil <= now) this.tries.delete(a);
+      // Still full: every entry is a live lockout. Forget the oldest rather than grow without bound.
+      if (this.tries.size >= MAX_ADDRS) this.tries.delete(this.tries.keys().next().value!);
+    }
+    const t = { bad: 0, lockedUntil: 0 };
+    this.tries.set(addr, t);
+    return t;
+  }
 }
+
+const addrOf = (req: IncomingMessage) => clientAddr(req.headers["x-forwarded-for"], req.socket.remoteAddress);
 
 export function send(res: ServerResponse, status: number, body: unknown) {
   res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" });

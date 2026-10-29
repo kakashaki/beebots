@@ -68,15 +68,20 @@ const nameProblem = (name: string): string | null =>
 const STEPS = ["The rules", "Password", "Decisions", "OpenAI", "Your bees", "The Hive", "Start"] as const;
 
 class TimedOut extends Error {}
+class BadCode extends Error {}
+
+/** The setup code from the engine's log, sent with every Setup write. */
+let setupCode = "";
 
 async function post<T>(path: string, body: unknown): Promise<T> {
   const r = await fetch(`/setup/${path}`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", "x-setup-code": setupCode },
     body: JSON.stringify(body),
   });
-  const j = (await r.json().catch(() => ({}))) as T & { error?: string };
+  const j = (await r.json().catch(() => ({}))) as T & { error?: string; badCode?: boolean };
   if (r.status === 410) throw new TimedOut(j.error ?? "Setup timed out.");
+  if (r.status === 401 && j.badCode) throw new BadCode(j.error ?? "That setup code is not right.");
   if (!r.ok) throw new Error(j.error ?? `HTTP ${r.status}`);
   return j;
 }
@@ -87,6 +92,8 @@ export function Setup() {
   const [password, setPassword] = useState("");
   const [password2, setPassword2] = useState("");
   const [timedOut, setTimedOut] = useState(false);
+  const [code, setCode] = useState("");
+  const [codeOk, setCodeOk] = useState(false);
   const [accept, setAccept] = useState({ notAdvice: false, paperDefault: false, ownRisk: false });
   // The decision model: Gemini 4 Argon by default, or Jev (TypeSafe AI).
   const [chooser, setChooser] = useState<"gemini" | "jev">("gemini");
@@ -130,6 +137,7 @@ export function Setup() {
   /** The message for an error; a timed-out Setup switches the whole page to the restart hint. */
   const fail = (e: unknown) => {
     if (e instanceof TimedOut) setTimedOut(true);
+    if (e instanceof BadCode) setCodeOk(false);
     return (e as Error).message;
   };
 
@@ -230,6 +238,44 @@ export function Setup() {
     );
   }
 
+  const checkCode = () =>
+    run(async () => {
+      setupCode = code.trim();
+      await post("check-code", {});
+      setCodeOk(true);
+    });
+
+  if (!codeOk) {
+    return (
+      <div className="setup">
+        <div className="setup-card">
+          <h1>beebots setup</h1>
+          <p>
+            To prove this is your server, enter the setup code from the engine's log. In Hostinger <b>Docker Manager</b>, open the engine's logs; on a
+            terminal, run <code>docker compose logs engine</code>. It is on the line that says <i>setup is open</i>, and changes every time the engine
+            restarts.
+          </p>
+          <input
+            className="setup-input"
+            placeholder="XXXX-XXXX-XXXX"
+            autoComplete="off"
+            spellCheck={false}
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && code.trim() && !busy && void checkCode()}
+            autoFocus
+          />
+          {error && <p className="setup-err small">{error}</p>}
+          <div className="setup-actions">
+            <button disabled={!code.trim() || busy} onClick={() => void checkCode()}>
+              Continue
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const beesReady = bees.length === 3 && bees.every((b) => b.design && b.img && !nameProblem(b.design.name));
   const anyBusy = busy || bees.some((b) => b.busy);
 
@@ -249,8 +295,8 @@ export function Setup() {
 
         {!status.secure && (
           <div className="setup-warn">
-            This page is on plain HTTP, so your keys travel unencrypted. For a quick paper-trading test that's a small risk. For anything longer,
-            point a domain at the server and set <code>PUBLIC_DOMAIN</code> so it gets HTTPS (see the README).
+            This page is on plain HTTP, so your keys travel unencrypted. Open it as <code>https://</code> instead, or point a domain at the server and set{" "}
+            <code>PUBLIC_DOMAIN</code> (see the README).
           </div>
         )}
 

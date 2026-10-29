@@ -10,7 +10,7 @@ import { EventBus } from "../src/events.js";
 import { hashPassword, PasswordGate } from "../src/gate.js";
 import { Hive } from "../src/hive.js";
 import { Keeper } from "../src/keeper.js";
-import { isPrivateAddress, KeeperHttp, keeperPath, KeeperSettings, parseHookUrl, parsePublicUrl } from "../src/keeper-http.js";
+import { isPrivateAddress, KeeperHttp, keeperPath, KeeperSettings, parseHookUrl, parsePublicUrl, zapOrigin } from "../src/keeper-http.js";
 import { effectiveCoins, liveRules, type OwnerRules } from "../src/lab/brain.js";
 import { LAB_MIN_INTERVAL_MS, LabDoor, labSignature } from "../src/lab/door.js";
 import { LabStore } from "../src/lab/store.js";
@@ -363,6 +363,20 @@ describe("beekeeper settings: addresses", () => {
     const home = [lan(10, 1, 2, 3), lan(172, 16, 0, 1), lan(172, 31, 255, 1), lan(192, 168, 0, 1), lan(169, 254, 1, 1)].map((a) => `http://${a}`);
     for (const a of ["http://localhost", "http://127.0.0.1:8080", ...home, "http://[::1]", "http://[fd00::1]", "http://box.local"]) expect(isPrivateAddress(a)).toBe(true);
     for (const a of ["http://203.0.113.7", "https://bees.example.com", `http://${lan(172, 32, 0, 1)}`, `http://${lan(11, 0, 0, 1)}`, "http://[2001:db8::1]"]) expect(isPrivateAddress(a)).toBe(false);
+  });
+
+  it("a bare IP over https (Caddy's internal certificate, which Zapier refuses) is given to the Zap as http", () => {
+    expect(zapOrigin("https://203.0.113.7")).toBe("http://203.0.113.7");
+    expect(zapOrigin("https://[2001:db8::1]")).toBe("http://[2001:db8::1]");
+    expect(zapOrigin("https://bees.example.com")).toBe("https://bees.example.com");
+    expect(zapOrigin("http://203.0.113.7")).toBe("http://203.0.113.7");
+    expect(zapOrigin("https://203.0.113.7:8443")).toBe("https://203.0.113.7:8443");
+  });
+
+  it("connecting from https://<ip> stores the address the Zap can actually call", async () => {
+    const r = await rig();
+    expect((await r.post("/keeper/connect", { hookUrl: HOOK, publicUrl: "https://203.0.113.7" })).status).toBe(200);
+    expect(JSON.parse(readFileSync(r.path, "utf8"))).toEqual({ hookUrl: HOOK, publicUrl: "http://203.0.113.7" });
   });
 
   it("the environment: the hook must be https, the interval at least a quarter hour, and PUBLIC_DOMAIN gives the address", () => {

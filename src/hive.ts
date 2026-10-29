@@ -370,7 +370,7 @@ export class Hive {
   }
 
   /** Public: no hive id, no key. */
-  status() {
+  status(req: IncomingMessage) {
     return {
       joined: this.joined,
       paper: this.paper,
@@ -378,7 +378,8 @@ export class Hive {
       lastReportAt: this.lastReportAt,
       verified: this.verified,
       problem: this.problem,
-      locked: this.gate.locked,
+      /** This visitor's address is locked out after too many wrong passwords. */
+      locked: this.gate.lockedFor(req),
       /** false: no owner password on this server yet (run Setup again to pick one). */
       passwordSet: this.gate.set,
     };
@@ -388,7 +389,7 @@ export class Hive {
   async handle(req: IncomingMessage, res: ServerResponse, path: string): Promise<boolean> {
     if (path === "/hive/status") {
       if (req.method !== "GET") send(res, 405, { error: "method not allowed" });
-      else send(res, 200, this.status());
+      else send(res, 200, this.status(req));
       return true;
     }
     if (path !== "/hive/join" && path !== "/hive/leave") return false;
@@ -424,11 +425,11 @@ export class Hive {
         this.join();
         log.info("joined the Hive from the dashboard");
       }
-      send(res, 200, { ok: true, ...this.status() });
+      send(res, 200, { ok: true, ...this.status(req) });
       return true;
     }
     const r = await this.leave();
-    send(res, 200, { ok: true, left: r, ...this.status() });
+    send(res, 200, { ok: true, left: r, ...this.status(req) });
     return true;
   }
 }

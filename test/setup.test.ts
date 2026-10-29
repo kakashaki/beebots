@@ -2,13 +2,13 @@ import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "n
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { loadConfig } from "../src/config.js";
 import type { BeeDesign } from "../src/openai.js";
 import { startServer } from "../src/server.js";
 import { isReservedName, loadSettings, SettingsSchema } from "../src/settings.js";
 import { verifyPassword } from "../src/gate.js";
-import { DesignError, finishDesign, imageDir, Setup } from "../src/setup.js";
+import { DesignError, finishDesign, imageDir, makeSetupCode, Setup } from "../src/setup.js";
 
 /** A fake OKX EEA crypto X-Perp list (no network in tests). */
 const COINS = ["BTC", "DOGE", "ETH", "HYPE", "PEPE", "SOL", "TRUMP"];
@@ -18,6 +18,7 @@ const BEES = [
   { name: "Donny", style: "boozy", tagline: "the loud one", rules: "Only trade TRUMP. Go long when it pumps.", coins: ["TRUMP"], look: "a bee in a red cap", image: true },
   { name: "Rex", style: "boozy", tagline: "the wild one", rules: "Chase whatever is pumping hardest this week.", coins: [], look: "a bee with a dinosaur hoodie", image: true },
 ];
+const CODE = "K7QM-2XPA-9TRW";
 const ACCEPT = { notAdvice: true, paperDefault: true, ownRisk: true };
 const SAVE = { jevKey: "good-jev-key", openaiKey: "sk-test-key", ownerPassword: "correct horse", accept: ACCEPT, bees: BEES, hive: false };
 
@@ -49,6 +50,7 @@ async function boot(opts: { designs?: BeeDesign[] } = {}) {
     refDir: dir,
     okxApiBase: "https://okx.invalid",
     windowMin: 120,
+    code: CODE,
     now: () => now,
     onSaved: () => saved++,
     checkJev: async (key) => (key === "good-jev-key" ? null : "Jev rejected that key."),
@@ -64,7 +66,9 @@ async function boot(opts: { designs?: BeeDesign[] } = {}) {
   await new Promise((r) => server.once("listening", r));
   close = () => server.close();
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  const post = (path: string, body: unknown) => fetch(`${base}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  /** A Setup write; by default from one visitor that has the right code. */
+  const post = (path: string, body: unknown, headers: Record<string, string> = {}) =>
+    fetch(`${base}${path}`, { method: "POST", headers: { "content-type": "application/json", "x-setup-code": CODE, ...headers }, body: JSON.stringify(body) });
   /** Portraits on disk, as the paint step leaves them. */
   const paintAll = () => {
     mkdirSync(imageDir(settingsPath), { recursive: true });
@@ -74,9 +78,66 @@ async function boot(opts: { designs?: BeeDesign[] } = {}) {
 }
 
 describe("setup", () => {
-  it("needs no code: the page can write straight away", async () => {
+  it("every write needs the setup code from the log; reaching the page first is not enough", async () => {
     const t = await boot();
-    expect((await t.post("/setup/check-jev", { key: "good-jev-key" })).status).toBe(200);
+    t.paintAll();
+    for (const path of ["/setup/check-code", "/setup/check-jev", "/setup/design", "/setup/paint", "/setup/save"]) {
+      const r = await t.post(path, SAVE, { "x-setup-code": "" });
+      expect(r.status).toBe(401);
+      expect(((await r.json()) as { badCode: boolean }).badCode).toBe(true);
+    }
+    expect((await t.post("/setup/save", SAVE, { "x-setup-code": "AAAA-AAAA-AAAA" })).status).toBe(401);
+    expect(loadSettings(t.settingsPath)).toBeNull();
+    expect(t.saved()).toBe(0);
+    expect((await t.post("/setup/check-code", {})).status).toBe(200);
+    // Typed by hand: case, spaces and dashes don't matter.
+    expect((await t.post("/setup/check-code", {}, { "x-setup-code": " k7qm 2xpa9trw " })).status).toBe(200);
+    expect((await t.post("/setup/save", SAVE)).status).toBe(200);
+  });
+
+  it("the code is printed to the log when Setup opens, and never served", async () => {
+    const out: string[] = [];
+    const spy = vi.spyOn(process.stdout, "write").mockImplementation((s) => (out.push(String(s)), true));
+    const t = await boot();
+    t.setup.announce();
+    spy.mockRestore();
+    expect(out.join("")).toContain(CODE);
+    expect(await (await fetch(`${t.base}/setup/status`)).text()).not.toContain(CODE);
+  });
+
+  it("a fresh code on every start, from an alphabet you can read off a log", () => {
+    const a = makeSetupCode();
+    expect(a).toMatch(/^[A-HJKMNP-Z2-9]{4}-[A-HJKMNP-Z2-9]{4}-[A-HJKMNP-Z2-9]{4}$/);
+    expect(makeSetupCode()).not.toBe(a);
+  });
+
+  it("ten wrong codes and that visitor is refused, even with the right one; others carry on", async () => {
+    const t = await boot();
+    const guesser = { "x-forwarded-for": "198.51.100.7" };
+    for (let i = 0; i < 10; i++) expect((await t.post("/setup/check-code", {}, { ...guesser, "x-setup-code": `WRONG${i}` })).status).toBe(401);
+    expect((await t.post("/setup/check-code", {}, guesser)).status).toBe(429);
+    expect((await t.post("/setup/check-code", {}, { "x-forwarded-for": "203.0.113.9" })).status).toBe(200);
+  });
+
+  it("caps save attempts per visitor (each one checks a key upstream)", async () => {
+    const t = await boot();
+    t.paintAll();
+    let checks = 0;
+    const bad = { ...SAVE, jevKey: "bad-jev-key" };
+    (t.setup as unknown as { checkJev: () => Promise<string> }).checkJev = async () => (checks++, "Jev rejected that key.");
+    for (let i = 0; i < 10; i++) expect((await t.post("/setup/save", bad)).status).toBe(400);
+    expect((await t.post("/setup/save", bad)).status).toBe(429);
+    expect((await t.post("/setup/save", SAVE)).status).toBe(429);
+    expect(checks).toBe(10);
+    expect(loadSettings(t.settingsPath)).toBeNull();
+  });
+
+  it("caps save attempts in total, whatever address they come from", async () => {
+    const t = await boot();
+    t.paintAll();
+    const bad = { ...SAVE, jevKey: "bad-jev-key" };
+    for (let i = 0; i < 30; i++) expect((await t.post("/setup/save", bad, { "x-forwarded-for": `198.51.100.${i}` })).status).toBe(400);
+    expect((await t.post("/setup/save", SAVE, { "x-forwarded-for": "203.0.113.9" })).status).toBe(429);
   });
 
   it("closes when the setup window runs out, with a restart hint", async () => {

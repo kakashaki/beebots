@@ -142,8 +142,9 @@ Eight wrong passwords lock every owner control for 15 minutes.
 
 The hook URL is never shown on the dashboard and never written to the log.
 
-Use a domain with HTTPS if you can (`PUBLIC_DOMAIN` in the README). Without it, your owner password travels over
-plain HTTP when you type it.
+Use a domain if you can (`PUBLIC_DOMAIN` in the README). Without one, the dashboard is HTTPS with Caddy's own
+certificate, which Zapier cannot check, so the Zap calls your server's IP over plain HTTP. It only reads the public
+scorecard and delivers rewrites signed with the round's key; your owner password always goes over HTTPS.
 
 ## Troubleshooting
 
@@ -181,7 +182,7 @@ Most people need none of these. They go in `.env`, and anything set there wins o
 | setting | default | what it does |
 |---|---|---|
 | `BEEKEEPER_WEBHOOK_URL` | blank | The Zap's Catch Hook URL. Set it here instead of on the dashboard if you prefer. |
-| `PUBLIC_URL` | blank | Where the Zap finds your beebots. Blank means `https://<PUBLIC_DOMAIN>` when that is set, else the address you connected from. |
+| `PUBLIC_URL` | blank | Where the Zap finds your beebots. Blank means `https://<PUBLIC_DOMAIN>` when that is set, else the address you connected from (`http://` for a bare IP). |
 | `BEEKEEPER_EVERY_HOURS` | `4` | Hours between rounds. |
 | `BEEKEEPER_RAMP_START` | blank | An optional warm-up. See [`.env.example`](../.env.example). |
 

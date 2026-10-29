@@ -1,7 +1,8 @@
 # beebots: three AI trading bees on one small VPS. Paper trading unless you deliberately change it.
 #
-#   docker compose up -d        then open http://<your-server-ip>/ and follow Setup
-#   docker compose logs engine  shows what the engine is doing (Setup is open for 2 hours after it starts)
+#   docker compose up -d        then open https://<your-server-ip>/ and follow Setup
+#   docker compose logs engine  shows the setup code Setup asks for, and what the engine is doing (Setup is open for
+#                               2 hours after it starts)
 #
 # The images are built from this repo by GitHub Actions. To build them yourself instead:
 #   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
@@ -38,6 +39,7 @@ services:
       BEE_START_EQUITY_USD: ${BEE_START_EQUITY_USD:-333}
       ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
       # Setup stays open this many minutes after the engine starts; after that, restart the engine to open it again.
+      # Each start prints a new setup code to this container's log; Setup asks for it.
       SETUP_WINDOW_MIN: ${SETUP_WINDOW_MIN:-120}
       # Only if your Setup file has no owner password (older installs, or keys set only here): gates the dashboard's
       # Join/Leave the Hive. At least 8 characters.
@@ -101,8 +103,9 @@ services:
       - "443:443"
       - "443:443/udp"
     environment:
-      # Blank = plain HTTP on the server's IP. Set a domain that points at this server to get automatic HTTPS.
-      SITE_ADDRESS: ${PUBLIC_DOMAIN:-:80}
+      # Always HTTPS. Set a domain that points at this server to get a real certificate; blank = the server's IP with
+      # Caddy's own certificate (the browser warns once). Plain HTTP redirects to HTTPS.
+      SITE_ADDRESS: ${PUBLIC_DOMAIN:-localhost}
     volumes:
       - caddy-data:/data
       - caddy-config:/config

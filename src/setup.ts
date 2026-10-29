@@ -1,12 +1,15 @@
 // First-run Setup. With no chooser key (Gemini or Jev) anywhere, the engine starts in setup mode: no trading, just the dashboard's Setup
-// page. The page is public (a fresh VPS), and there is no code to dig out of a log, so it is protected by:
-//  - first come, first served: once saved, Setup is closed for good (until the owner deletes settings.json);
+// page. The page is public (a fresh VPS), so it is protected by:
+//  - a setup code: printed only to the engine's log when Setup opens (a new one on every start), and needed for every
+//    Setup write, so reaching the page first is not enough to take the server over;
+//  - once saved, Setup is closed for good (until the owner deletes settings.json);
 //  - a setup window: SETUP_WINDOW_MIN after the engine starts (default 120), Setup locks until the container restarts;
-//  - caps on the calls that cost money (designs and portraits, in total and per visitor).
+//  - caps on wrong codes and saves per visitor, and on the calls that cost money (in total and per visitor).
 // The owner picks an owner password here; later writes from the public dashboard need it (gate.ts).
 // After a save the engine exits and Docker restarts it with the new settings, in paper trading.
 // Each bee is designed from one sentence ("how do you want this bee to trade?"): OpenAI invents its name, rules, coins
 // and look, the engine checks the coins against OKX's live list and picks the brain it runs on, then OpenAI paints it.
+import { randomInt, timingSafeEqual } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { dirname, join } from "node:path";
@@ -28,6 +31,13 @@ const MAX_PAINTS = 24;
 const MAX_DESIGNS = 60;
 /** Per visitor (client address): paid or outbound calls (designs, portraits, key checks). */
 const MAX_CALLS_PER_ADDR = 40;
+/** Per visitor: wrong setup codes before that visitor is refused until the engine restarts. */
+const MAX_BAD_CODES_PER_ADDR = 10;
+/** Save attempts (each one checks a key upstream): per visitor, and in total. */
+const MAX_SAVES_PER_ADDR = 10;
+const MAX_SAVES = 30;
+/** Visitors remembered per counter; past this, new visitors are refused (Setup is a one-person job). */
+const MAX_ADDRS = 10_000;
 const COINS_TTL_MS = 10 * 60_000;
 const MAX_BODY = 32 * 1024;
 
@@ -44,6 +54,8 @@ export interface SetupOpts {
   okxApiBase: string;
   /** Minutes after the engine starts that Setup stays open (SETUP_WINDOW_MIN). */
   windowMin: number;
+  /** Injectable for tests; default: a fresh random code, printed to the log by announce(). */
+  code?: string;
   now?: () => number;
   /** Injectable for tests; defaults to one real Jev call. */
   checkJev?: (key: string, model: string) => Promise<string | null>;
@@ -58,6 +70,19 @@ export interface SetupOpts {
 }
 
 export class DesignError extends Error {}
+
+/** No 0/O, 1/I/L: the code is read off a log and typed in by hand. */
+const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+
+/** A setup code like "K7QM-2XPA-9TRW" (12 characters from 31, about 59 bits). */
+export function makeSetupCode(): string {
+  const c = Array.from({ length: 12 }, () => CODE_ALPHABET[randomInt(CODE_ALPHABET.length)]).join("");
+  return `${c.slice(0, 4)}-${c.slice(4, 8)}-${c.slice(8)}`;
+}
+
+const normCode = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+export const SETUP_CODE_HEADER = "x-setup-code";
 
 export const TIMED_OUT =
   "Setup timed out to keep this server safe. Restart the engine container (Hostinger Docker Manager → Restart, or `docker compose restart engine`) to open it again.";
@@ -137,10 +162,22 @@ const SaveBody = z.object({
   hive: z.boolean(),
 });
 
+/** Counts one more for `addr`; false (and nothing counted) past `max`, or when too many visitors are remembered. */
+function bump(m: Map<string, number>, addr: string, max: number): boolean {
+  const n = (m.get(addr) ?? 0) + 1;
+  if (n > max || (n === 1 && m.size >= MAX_ADDRS)) return false;
+  m.set(addr, n);
+  return true;
+}
+
 export class Setup {
   private readonly openedAt: number;
   private readonly now: () => number;
+  private readonly code: string;
   private calls = new Map<string, number>();
+  private badCodes = new Map<string, number>();
+  private saveTries = new Map<string, number>();
+  private saves = 0;
   private paints = 0;
   private designs = 0;
   private saved = false;
@@ -155,6 +192,7 @@ export class Setup {
   constructor(private o: SetupOpts) {
     this.now = o.now ?? Date.now;
     this.openedAt = this.now();
+    this.code = o.code ?? makeSetupCode();
     this.checkJev = o.checkJev ?? checkJevKey;
     this.checkGemini = o.checkGemini ?? ((key, model) => checkGeminiKey(key, model));
     this.listCoins = o.listCoins ?? (() => fetchXperpCoins(o.okxApiBase));
@@ -181,7 +219,7 @@ export class Setup {
   }
 
   announce(): void {
-    log.info("setup is open: open this server's address in a browser to set up your bees", { windowMin: this.o.windowMin });
+    log.info(`setup is open: open this server's address in a browser and enter the setup code ${this.code}`, { windowMin: this.o.windowMin });
     const t = setTimeout(() => {
       if (!this.saved) log.warn("setup timed out; restart the engine container to open it again");
     }, this.o.windowMin * 60_000);
@@ -218,14 +256,32 @@ export class Setup {
       send(res, 410, { error: TIMED_OUT, timedOut: true });
       return true;
     }
-    if (path === "/setup/design" || path === "/setup/paint" || path === "/setup/check-jev" || path === "/setup/check-gemini" || path === "/setup/check-openai") {
-      const addr = clientAddr(req.headers["x-forwarded-for"], req.socket.remoteAddress);
-      const n = (this.calls.get(addr) ?? 0) + 1;
-      if (n > MAX_CALLS_PER_ADDR) {
+    const addr = clientAddr(req.headers["x-forwarded-for"], req.socket.remoteAddress);
+    if ((this.badCodes.get(addr) ?? 0) >= MAX_BAD_CODES_PER_ADDR) {
+      send(res, 429, { error: "Too many wrong setup codes. Restart the engine to carry on." });
+      return true;
+    }
+    if (!this.codeOk(req.headers[SETUP_CODE_HEADER])) {
+      if (!bump(this.badCodes, addr, Infinity)) {
         send(res, 429, { error: "That is a lot of requests. Restart the engine to carry on." });
         return true;
       }
-      this.calls.set(addr, n);
+      send(res, 401, { error: "That setup code is not right. It is in the engine's log (docker compose logs engine), on the line that says \"setup is open\".", badCode: true });
+      return true;
+    }
+    const tooMany = { error: "That is a lot of requests. Restart the engine to carry on." };
+    if (path === "/setup/design" || path === "/setup/paint" || path === "/setup/check-jev" || path === "/setup/check-gemini" || path === "/setup/check-openai") {
+      if (!bump(this.calls, addr, MAX_CALLS_PER_ADDR)) {
+        send(res, 429, tooMany);
+        return true;
+      }
+    }
+    if (path === "/setup/save") {
+      if (this.saves >= MAX_SAVES || !bump(this.saveTries, addr, MAX_SAVES_PER_ADDR)) {
+        send(res, 429, tooMany);
+        return true;
+      }
+      this.saves++;
     }
     let body: Record<string, unknown>;
     try {
@@ -248,6 +304,12 @@ export class Setup {
     return true;
   }
 
+  private codeOk(given: string | string[] | undefined): boolean {
+    const a = Buffer.from(normCode(String(given ?? "")));
+    const b = Buffer.from(normCode(this.code));
+    return a.length === b.length && timingSafeEqual(a, b);
+  }
+
   private openaiKey(body: Record<string, unknown>): string | undefined {
     const k = typeof body.openaiKey === "string" ? body.openaiKey.trim() : "";
     return k || this.o.openai.apiKey;
@@ -255,6 +317,10 @@ export class Setup {
 
   private async route(path: string, body: Record<string, unknown>, res: ServerResponse) {
     switch (path) {
+      case "/setup/check-code":
+        // The code itself was checked in handle(); the page asks this before showing the rest of Setup.
+        return send(res, 200, { ok: true });
+
       case "/setup/check-jev": {
         const key = String(body.key ?? "").trim();
         if (key.length < 8) return send(res, 400, { error: "Paste your Jev API key." });

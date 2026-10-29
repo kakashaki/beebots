@@ -37,7 +37,11 @@ export class Visitors {
   }
 }
 
-/** The visitor's address as Caddy reports it (first X-Forwarded-For hop), else the socket address. Never logged. */
+/**
+ * The visitor's address as Caddy reports it, else the socket address. Never logged. Caddy trusts no proxies here (no
+ * trusted_proxies in the Caddyfile), so it replaces any X-Forwarded-For the client sent with the real peer address:
+ * the header holds exactly one hop, and a client cannot choose it.
+ */
 export function clientAddr(xff: string | string[] | undefined, socketAddr: string | undefined): string {
   const first = (Array.isArray(xff) ? xff[0] : xff)?.split(",")[0]?.trim();
   return first || socketAddr || "unknown";

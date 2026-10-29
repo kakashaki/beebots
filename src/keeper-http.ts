@@ -10,6 +10,7 @@
 // The hook URL is a secret (anyone who has it can start the owner's Zap): it is never served and never logged.
 import { existsSync, readFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { isIP } from "node:net";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import { BEES, originOf, type BeeId } from "./config.js";
@@ -51,6 +52,15 @@ export function parseHookUrl(v: unknown): string | null {
 /** This engine's public address: http(s)://host[:port], no path. null = not acceptable. */
 export function parsePublicUrl(v: unknown): string | null {
   return typeof v === "string" && v.length <= 200 ? originOf(v) : null;
+}
+
+/**
+ * Where the Zap should call, given the page's own address. A bare IP over https has Caddy's internal certificate, which
+ * Zapier refuses, so the Zap uses plain http there (the Caddyfile serves it only the scorecard and the signed lab door).
+ */
+export function zapOrigin(origin: string): string {
+  const u = new URL(origin);
+  return u.protocol === "https:" && !u.port && isIP(u.hostname.replace(/^\[|\]$/g, "")) ? `http://${u.host}` : origin;
 }
 
 /** An address only this machine or its own network can reach: Zapier could never call it. */
@@ -213,7 +223,7 @@ export class KeeperHttp {
         const given = parsePublicUrl(p.data.publicUrl);
         if (!given) return this.reply(res, 400, { error: "This page's address is missing or not valid. Open the dashboard on its public address and connect again." });
         if (isPrivateAddress(given)) return this.reply(res, 400, { error: "Zapier cannot reach this address. Open the dashboard on its public address (your server's IP or domain) and connect again." });
-        publicUrl = given;
+        publicUrl = zapOrigin(given);
       }
       settings.connect(hookUrl, publicUrl);
       keeper.reconfigured();

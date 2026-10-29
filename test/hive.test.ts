@@ -61,6 +61,8 @@ function makeHive(opts: { mode?: "dry" | "demo" | "live"; responses?: Parameters
 }
 
 const readState = (path: string) => JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+/** A request with no address, for status() outside an HTTP round trip. */
+const anon = { headers: {}, socket: {} } as never;
 
 describe("hive report", () => {
   it("matches the contract: bees from the engine, every fill since the start, oldest first, qty in base units", () => {
@@ -110,8 +112,8 @@ describe("hive report", () => {
     expect(t.calls[0]!.url).toBe("https://hive.test/hive/report");
     expect(t.calls[0]!.method).toBe("POST");
     expect(t.calls[0]!.body!.key).toBe(key);
-    expect(t.hive.status()).toMatchObject({ joined: true, verified: { bee1: true, bee2: false }, problem: null });
-    expect(t.hive.status().lastReportAt).toBeGreaterThan(0);
+    expect(t.hive.status(anon)).toMatchObject({ joined: true, verified: { bee1: true, bee2: false }, problem: null });
+    expect(t.hive.status(anon).lastReportAt).toBeGreaterThan(0);
   });
 
   it("clamps nextReportInS to at least 240 s", async () => {
@@ -124,10 +126,10 @@ describe("hive report", () => {
     const t = makeHive({ responses: [{ status: 429 }, { status: 503 }, new Error("ECONNREFUSED"), { status: 200, body: { ok: true, verified: {}, nextReportInS: 300 } }, { status: 500 }] });
     t.hive.join();
     expect(await t.hive.report()).toBe(300);
-    expect(t.hive.status().problem).toMatch(/slow down/);
+    expect(t.hive.status(anon).problem).toMatch(/slow down/);
     expect(await t.hive.report()).toBe(600);
     expect(await t.hive.report()).toBe(1200);
-    expect(t.hive.status().problem).toMatch(/unreachable/);
+    expect(t.hive.status(anon).problem).toMatch(/unreachable/);
     expect(await t.hive.report()).toBe(300);
     expect(await t.hive.report()).toBe(300);
   });
@@ -142,7 +144,7 @@ describe("hive report", () => {
     const t = makeHive({ responses: [{ status: 401, body: { error: "key mismatch" } }] });
     t.hive.join();
     expect(await t.hive.report()).toBeNull();
-    expect(t.hive.status().problem).toMatch(/no longer matches.*re-join/i);
+    expect(t.hive.status(anon).problem).toMatch(/no longer matches.*re-join/i);
   });
 
   it("refuses to run in MODE=live: no join, no report, no request", async () => {
@@ -152,7 +154,7 @@ describe("hive report", () => {
     expect(existsSync(t.path)).toBe(false);
     expect(await t.hive.report()).toBeNull();
     expect(t.calls).toHaveLength(0);
-    expect(t.hive.status()).toMatchObject({ joined: false, paper: false });
+    expect(t.hive.status(anon)).toMatchObject({ joined: false, paper: false });
   });
 
   it("will not report from live even with a hive.json left over from paper trading", async () => {
@@ -188,7 +190,7 @@ describe("hive state file", () => {
     expect(after.joined).toBe(false);
     expect(after.key).toBeUndefined();
     expect(after.hiveId).toBeUndefined();
-    expect(t.hive.status().joined).toBe(false);
+    expect(t.hive.status(anon).joined).toBe(false);
   });
 
   it("still wipes the key locally when the DELETE fails, and says so", async () => {
@@ -227,8 +229,8 @@ describe("owner password gate", () => {
     await new Promise((r) => server.once("listening", r));
     close = () => server.close();
     const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-    const post = (path: string, pw = PASSWORD) =>
-      fetch(`${base}${path}`, { method: "POST", headers: { "content-type": "application/json", "x-owner-password": encodeURIComponent(pw) }, body: "{}" });
+    const post = (path: string, pw = PASSWORD, headers: Record<string, string> = {}) =>
+      fetch(`${base}${path}`, { method: "POST", headers: { "content-type": "application/json", "x-owner-password": encodeURIComponent(pw), ...headers }, body: "{}" });
     return { ...t, base, post };
   }
 
@@ -260,6 +262,18 @@ describe("owner password gate", () => {
     expect((await t.post("/hive/join")).status).toBe(429);
     expect(existsSync(t.path)).toBe(false);
     expect(((await (await fetch(`${t.base}/hive/status`)).json()) as { locked: boolean }).locked).toBe(true);
+  });
+
+  it("the lockout is per address: a stranger guessing cannot lock the owner out", async () => {
+    const t = await boot();
+    const stranger = { "x-forwarded-for": "198.51.100.7" };
+    const owner = { "x-forwarded-for": "203.0.113.9" };
+    for (let i = 0; i < 8; i++) expect((await t.post("/hive/join", "not the password", stranger)).status).toBe(401);
+    expect((await t.post("/hive/join", PASSWORD, stranger)).status).toBe(429);
+    const status = async (h: Record<string, string>) => ((await (await fetch(`${t.base}/hive/status`, { headers: h })).json()) as { locked: boolean }).locked;
+    expect(await status(stranger)).toBe(true);
+    expect(await status(owner)).toBe(false);
+    expect((await t.post("/hive/join", PASSWORD, owner)).status).toBe(200);
   });
 
   it("with no owner password set, nothing can join or leave from the page", async () => {
