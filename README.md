@@ -1,5 +1,11 @@
 # beebots 🐝
 
+<p>
+  <a href="#security-audit"><img src="docs/audit/badge-audit.svg" alt="Security audit: open-source AI on Telnyx" height="28"></a>
+  <a href="#security-audit"><img src="docs/audit/badge-findings.svg" alt="Audit findings: 5 fixed, 1 false alarm" height="28"></a>
+  <a href="https://youtu.be/N5VouhdyQkA"><img src="docs/audit/badge-video.svg" alt="Watch the audit on YouTube" height="28"></a>
+</p>
+
 > [!IMPORTANT]
 > **Experiment concluded: -21.4% in 30 days of real money.**
 > From 25 Sep to 26 Oct 2026 the three official bees traded $999 of real money on OKX. They ended at $785.16, and the AI
@@ -9,12 +15,50 @@
 > - **Read the full result:** [Do AI Trading Bots Work? A Real-Money Test](https://creatormagic.ai/blog/do-ai-trading-bots-work/)
 > - **Watch the video:** [youtu.be/bp_u9Gzp1OU](https://youtu.be/bp_u9Gzp1OU)
 >
-> **Read this before you run it.** The code still works and stays here as a record of how it was built, but it is no
-> longer maintained. It made no money for me, and nothing about it suggests it will for you. Run it on paper (the
-> default). If you switch it to real money anyway, only use money you are happy to lose.
+> **Read this before you run it.** The code still works and stays here as a record of how it was built. It is no
+> longer developed, but it has had one last security audit and every serious finding is fixed (see
+> [Security audit](#security-audit)). It made no money for me, and nothing about it suggests it will for you. Run it
+> on paper (the default). If you switch it to real money anyway, only use money you are happy to lose.
 >
 > beebots.tech now redirects to the write-up, and **the Hive leaderboard is closed**. A self-hosted install keeps
 > trading on paper as before, but joining the Hive does nothing.
+
+## Security audit
+
+<a href="https://mrc.fm/telnyx">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/audit/telnyx-logo-white.svg">
+    <img src="docs/audit/telnyx-logo.svg" alt="Telnyx" height="40">
+  </picture>
+</a>
+
+**Audited on 29 Oct 2026 by open-source AI models running on [Telnyx Inference](https://mrc.fm/telnyx), for less than
+40 cents.** The fixes are in [v2026.11.05](https://github.com/imikerussell/beebots/releases/tag/v2026.11.05).
+
+[![Watch the audit: Open Source AI Hacked My Code For 40¢](docs/audit/video.jpg)](https://youtu.be/N5VouhdyQkA)
+
+How it ran:
+
+1. **GLM-5.3 Flash** read the whole repo in one go (about 294,000 tokens, 70 seconds, 4.6¢) and flagged 18 findings.
+2. **Kimi K3** took a second look at the 5 riskiest, reading only the files they touch (34¢). It confirmed 4, called 1
+   partly right, and found 3 that Flash had missed.
+3. **Claude Code** checked the findings against the code, fixed the real ones and added tests for every fix.
+
+| what the AI found | where it stands |
+|---|---|
+| Whoever reached a fresh install first could finish Setup and take the server over | **Fixed.** Setup needs a one-time code that only the engine's log shows |
+| On an install without a domain, keys and the owner password crossed the network as plain HTTP | **Fixed.** HTTPS by default, with Caddy's own certificate on the bare IP |
+| A trade could open with no stop loss during a gap in market data | **Fixed.** No stop, no trade |
+| Setup's save button had no rate limit | **Fixed.** 10 tries per address, 30 in total |
+| Eight wrong passwords from anyone locked the owner out of every control (found by Kimi K3) | **Fixed.** Only the address that got it wrong is locked out |
+| A faked `X-Forwarded-For` header could dodge the per-visitor limits | **False alarm.** Caddy overwrites that header; a test now pins it |
+| Setup's per-visitor counter has no size cap (found by Kimi K3) | Open, low. Keyed by real addresses and cleared on restart |
+| The live event stream skips the redaction filter (found by Kimi K3) | Open, low. Defence in depth; no leak found |
+
+Telnyx gave viewers of the video a code: **CMAGIC25** gets you $25 of build credit at
+[mrc.fm/telnyx](https://mrc.fm/telnyx).
+
+## What it is
 
 [![Watch the video: I built AI trading bees with Jev](docs/video.jpg)](https://www.youtube.com/watch?v=8ijN8LGljKg)
 
