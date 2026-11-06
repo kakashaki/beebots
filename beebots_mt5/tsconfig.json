@@ -1,0 +1,18 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "..",
+    "noEmit": true
+  },
+  "include": [
+    "src/mt5/recovery.ts",
+    "src/mt5/recovery.test.ts",
+    "src/mt5/protect.ts",
+    "src/mt5/risk.ts",
+    "src/mt5/hours.ts",
+    "src/mt5/gate.ts",
+    "src/mt5/latency.ts",
+    "src/market/types.ts",
+    "src/market/kinds.ts"
+  ]
+}
