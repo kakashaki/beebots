@@ -4,6 +4,7 @@
 import { kronosCertain, kronosDelta, KRONOS_AGREE_ATR, KRONOS_CERT_AGREE, KRONOS_CERT_STD, MIN_JEV_CONF, type KronosIn } from "./gate.js";
 import { STALE_VERDICT_MS } from "./latency.js";
 import type { Candle } from "../market/types.js";
+import { DEMO_SCALP_ID, SCALP_COOLDOWN_BARS } from "./demo-scalp.js";
 import { protectionFor, RR, MIN_SL_ATR } from "./protect.js";
 import { checkOrder, DEMO_LOGIN, DEMO_SERVER, LOT, MAX_SL_FRACTION, CONTRACT_SIZE, type AccountInfo, type Check } from "./risk.js";
 
@@ -35,6 +36,9 @@ export interface RecoveryEnvConfig {
    */
   demo1r: boolean;
   demo1rInvalid: boolean;
+  /** Extra closed-bar scalp. Requires demo 1R. Does not replace promoted candidates. */
+  demoEnhanced1r: boolean;
+  enhanced1rInvalid: boolean;
   invalidReason: string | null;
 }
 
@@ -55,6 +59,13 @@ const numEnv = (v: string | undefined): number | null => {
 };
 const addKey = (xs: readonly string[], key: string): string[] => (xs.includes(key) ? [...xs] : [...xs, key].sort());
 const demo1rInvalid = (raw: string | undefined): boolean => raw != null && raw.trim() !== "" && raw !== "0" && raw !== "1";
+function enhancedFlags(env: Record<string, string | undefined>): { demoEnhanced1r: boolean; enhanced1rInvalid: boolean } {
+  const raw = env.BEEBOTS_DEMO_ENHANCED_1R;
+  const bad = raw != null && raw.trim() !== "" && raw !== "0" && raw !== "1";
+  const on = raw === "1";
+  const demoOn = env.BEEBOTS_DEMO_1R === "1" && !demo1rInvalid(env.BEEBOTS_DEMO_1R);
+  return { demoEnhanced1r: on && demoOn, enhanced1rInvalid: bad || (on && !demoOn) };
+}
 
 export function demoAccount(acct: { login: number; server: string; tradeMode: string }): boolean {
   return acct.login === DEMO_LOGIN && acct.server === DEMO_SERVER && acct.tradeMode === "demo";
@@ -74,6 +85,7 @@ export function recoveryConfigFromEnv(env: Record<string, string | undefined> = 
   const quoteAge = numEnv(env.BEEBOTS_RECOVERY_MAX_QUOTE_AGE_MS);
   const latency = numEnv(env.BEEBOTS_RECOVERY_MAX_LATENCY_MS);
   const forecast = numEnv(env.BEEBOTS_RECOVERY_MAX_FORECAST_AGE_MS);
+  const enh = enhancedFlags(env);
   const base: RecoveryEnvConfig = {
     armed: false,
     enterUsd: enter,
@@ -85,6 +97,8 @@ export function recoveryConfigFromEnv(env: Record<string, string | undefined> = 
     disableBee1: env.BEEBOTS_DISABLE_BEE1 !== "0",
     demo1r: env.BEEBOTS_DEMO_1R === "1",
     demo1rInvalid: demo1rInvalid(env.BEEBOTS_DEMO_1R),
+    demoEnhanced1r: enh.demoEnhanced1r,
+    enhanced1rInvalid: enh.enhanced1rInvalid,
     invalidReason: null,
   };
   if (base.demo1rInvalid) return { ...base, invalidReason: "demo_1r_invalid" };
@@ -360,6 +374,11 @@ export interface PlanInput {
   kronos: KronosSnap | null;
   latencyMs: number | null;
   dedup: DedupState;
+  /** Promoted program vs the opted-in demo scalp. */
+  source?: "candidate" | "demo_scalp";
+  /** Predicate from demoScalp when the program itself returns no side. */
+  diagReason?: string | null;
+  lastScalpOrderBar?: number | null;
   lastTickMs?: number;
 }
 
@@ -419,7 +438,9 @@ export function planEntry(p: PlanInput): PlanResult {
   if (p.dedup.done.includes(key)) return skip("dedup_done", p.dedup, true);
   const ev = evidenceKey(p);
   if (p.dedup.evidence.includes(ev)) return skip("dedup_evidence", p.dedup, false);
-  if (p.signal !== "buy" && p.signal !== "sell") return remember(p, "no_signal", "noSignal", key, true);
+  if (p.signal !== "buy" && p.signal !== "sell") return remember(p, p.diagReason || "no_signal", "noSignal", key, true);
+  if (p.source === "demo_scalp" && !p.cfg.demoEnhanced1r) return remember(p, p.cfg.enhanced1rInvalid ? "enhanced_1r_requires_demo_1r" : "enhanced_1r_off", "done", key, true);
+  if (p.source === "demo_scalp" && p.lastScalpOrderBar != null && p.bar > p.lastScalpOrderBar && p.bar - p.lastScalpOrderBar <= SCALP_COOLDOWN_BARS * 300) return remember(p, "cooldown", "done", key, true);
   if (p.openMagics.includes(p.magic)) return remember(p, "already_open", "done", key, true);
   if (p.correlated) return remember(p, "correlated", "evidence", ev, false);
   if (p.entryBlocked) return remember(p, "entry_blocked", "evidence", ev, false);
@@ -593,4 +614,15 @@ export function specsFromQuote(q: QuoteFields | null, env: Record<string, string
   };
 }
 
-export { DEMO_LOGIN, DEMO_SERVER, MIN_JEV_CONF, KRONOS_AGREE_ATR, KRONOS_CERT_AGREE, KRONOS_CERT_STD, MAX_SL_FRACTION, MIN_SL_ATR };
+/** One row of the decision log. No login, server, or credentials. */
+export function entryDiagnostic(p: PlanInput, result: PlanResult): Record<string, number | string | boolean | null> {
+  const age = (ts: number | null | undefined) => (typeof ts === "number" ? p.nowMs - ts : null);
+  return {
+    id: p.candidateId, bee: p.bee, source: p.source ?? "candidate", bar: p.bar, action: result.action, reason: result.reason,
+    quoteAgeMs: age(p.quote?.tsMs ?? null), latencyMs: p.latencyMs, jevAgeMs: age(p.jev?.tsMs ?? null), kronosAgeMs: age(p.kronos?.tsMs ?? null),
+    reachedNoise: result.reason === "order" || result.reason.startsWith("noise:") || result.reason.startsWith("infeasible:"),
+    balance: p.account.balance, mode: p.cfg.demo1r && demoAccount(p.account) ? "recovery" : p.mode,
+  };
+}
+
+export { DEMO_LOGIN, DEMO_SERVER, MIN_JEV_CONF, KRONOS_AGREE_ATR, KRONOS_CERT_AGREE, KRONOS_CERT_STD, MAX_SL_FRACTION, MIN_SL_ATR, DEMO_SCALP_ID };

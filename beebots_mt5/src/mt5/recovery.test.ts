@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
+import { evolveRecoveryScript } from "./evolve-path.js";
 import { describe, expect, it } from "vitest";
 import type { Candle } from "../market/types.js";
 import { KRONOS_AGREE_ATR, MIN_JEV_CONF } from "./gate.js";
@@ -49,19 +49,6 @@ function plan(over: Partial<PlanInput> = {}): PlanInput {
     kronos: { direction: "up", expectedMovePx: 2, moveStdPx: 0.4, agreeShare: 0.8, tsMs: WED - 1000 },
     latencyMs: 100, dedup: emptyDedup(), lastTickMs: WED - 200, ...over,
   };
-}
-
-/** Sibling of beebots_mt5 on the box (`/workspace/evolve`) and in this repo. Not cwd-relative. */
-export function evolveRecoveryScript(): string {
-  const here = dirname(fileURLToPath(import.meta.url));
-  const candidates = [
-    process.env.EVOLVE_ROOT ? join(process.env.EVOLVE_ROOT, "lib", "recovery.py") : "",
-    "/workspace/evolve/lib/recovery.py",
-    join(here, "../../../evolve/lib/recovery.py"),
-  ].filter((p) => p.length > 0);
-  const hit = candidates.find((p) => existsSync(p));
-  if (!hit) throw new Error(`recovery.py not found (tried ${candidates.join(", ")})`);
-  return hit;
 }
 
 function py(req: unknown): Record<string, unknown> {

@@ -52,6 +52,7 @@ Nothing is armed until these are actually in the process environment. Copy the f
 
 ```
 BEEBOTS_DEMO_1R=1
+BEEBOTS_DEMO_ENHANCED_1R=1
 BEEBOTS_COMMISSION_USD_PER_LOT_SIDE=3.5
 BEEBOTS_COMMISSION_RT_USD=0.08
 BEEBOTS_SLIPPAGE_PRICE=0.30
@@ -63,6 +64,21 @@ Leave present: `FORCE_STOP`. Leave absent unless you want a full halt: `EMERGENC
 
 Bee1 stays off. Force loop stays off.
 
+## Why bee2/bee3 logged `no_signal` for an hour
+
+The promoted programs `bee2-1acecae64173` (breezy v2) and `bee3-4c1fc68dfb92` (boozy v3b) return only `buy`, `sell`, or `None` from the last **closed** M5 bar. bee2 needs an H4 Donchian bias plus a 0.25–1.2 ATR break of a 48-bar edge, a 2.5 ATR pullback, or an outer-band fade. bee3 needs about 1.2% over 24 hours in calm tape, or the same style of breakout. `tp_r` does not change that function. Re-reading a cached null does not create a setup, so Kronos and OpenJev are never asked. A quote that is 18 seconds old still fails the 2 second quote gate later; a 70–88 second health gap is not a reason to loosen that gate.
+
+`BEEBOTS_DEMO_ENHANCED_1R=1` adds a second, opted-in setup on the same closed bars. It does not edit those two files. It can propose a long or short only for:
+
+- a rejection from the outer quarter of a 48-bar box that is 3–12 ATR wide, or
+- a 1–3 ATR impulse over the prior 12 bars that pulls back to its mean without a new extreme.
+
+A bar wider than 2.5 ATR, Friday from 19:00 UTC, and the weekend are not setups. The proposal is still not an order unless the fresh quote, the latency bound, certain Kronos, and OpenJev all agree, the 0.01 lot stop stays inside 1–2 ATR and the 25% ceiling, and the same side is not already open. The same setup is not ordered twice. After a scalp fill, the next three M5 bars are a cooldown. This does not promise a trade in any given hour.
+
+Each skip log is one row: candidate id, source (`candidate` or `demo_scalp`), bar open time, reason (`candidate_none`, `no_setup`, `impulse_bar`, `noise:quote_stale`, `cooldown`, …), quote age, latency, and whether the noise gate was reached. `candidate_none` means the promoted program returned None and named no predicate, so Kronos and OpenJev were not asked. The row has no login and no key.
+
+Set `BEEBOTS_DEMO_ENHANCED_1R=1` only together with `BEEBOTS_DEMO_1R=1`. Either flag alone does not enable the scalp. Unset it to roll the extra setup back; the promoted programs stay as they were.
+
 ## Deploy steps (demo box only, after review)
 
 1. Copy onto the box, where `beebots_mt5` and `evolve` are siblings:
@@ -71,6 +87,7 @@ Bee1 stays off. Force loop stays off.
    - `beebots_mt5/src/mt5/evolve.ts`
    - `beebots_mt5/mql5/BeeBridge.mq5` (already rebuilt with stop/freeze/point/volume on the quote)
    - `evolve/lib/recovery.py`
+   - `evolve/lib/demo_scalp.py`
    - `evolve/lib/common.py`
    - `evolve/lib/live_signals.py`
    - `beebots_mt5/index-recovery.patch`
@@ -87,8 +104,8 @@ Balance-band recovery (`BEEBOTS_RECOVERY_ENTER_USD` / `EXIT`) is a different swi
 
 ## Roll back
 
-1. Restore the previous `protect.ts`, `evolve.ts`, `index.ts`, `BeeBridge.mq5`, `evolve/lib/common.py`, and `evolve/lib/live_signals.py`. Remove `recovery.ts` and `evolve/lib/recovery.py` (or check out the previous revision).
-2. Unset `BEEBOTS_DEMO_1R`, `BEEBOTS_RECOVERY_ENTER_USD`, `BEEBOTS_RECOVERY_EXIT_USD`, `BEEBOTS_DEMO_BALANCE_OVERRIDE`, `BEEBOTS_COMMISSION_USD_PER_LOT_SIDE`, `BEEBOTS_COMMISSION_RT_USD`, and `BEEBOTS_SLIPPAGE_PRICE`.
+1. Restore the previous `protect.ts`, `evolve.ts`, `index.ts`, `BeeBridge.mq5`, `evolve/lib/common.py`, and `evolve/lib/live_signals.py`. Remove `recovery.ts`, `demo-scalp.ts`, `evolve/lib/recovery.py`, and `evolve/lib/demo_scalp.py` (or check out the previous revision). The files in `evolve/fixtures/live/` are copies of the promoted programs and are not loaded by the engine.
+2. Unset `BEEBOTS_DEMO_1R`, `BEEBOTS_DEMO_ENHANCED_1R`, `BEEBOTS_RECOVERY_ENTER_USD`, `BEEBOTS_RECOVERY_EXIT_USD`, `BEEBOTS_DEMO_BALANCE_OVERRIDE`, `BEEBOTS_COMMISSION_USD_PER_LOT_SIDE`, `BEEBOTS_COMMISSION_RT_USD`, and `BEEBOTS_SLIPPAGE_PRICE`.
 3. Delete `data/recovery_mode.json` if you do not want the next build to see a saved mode. The old code ignores it. Do not delete `FORCE_STOP`. Do not create or delete `EMERGENCY_STOP` as part of rollback unless you added it yourself.
 4. Restart the process. Open positions keep whatever SL/TP the server already has; rollback does not modify them either.
 5. `BEEBOTS_DISABLE_BEE1=0` restores bee1 in the Python signal list for a normal (2R) run. Recovery still refuses bee1.

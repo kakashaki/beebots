@@ -13,13 +13,13 @@ import type { Mt5Executor } from "./executor.js";
 import { entryBlockedReason } from "./marketgate.js";
 import { MT5_INST_ID } from "./market.js";
 import {
-  balanceForEntry, cachedBarSignals, emptyDedup, parsePersist, planEntry, pruneDedup, recoveryConfigFromEnv,
+  balanceForEntry, cachedBarSignals, emptyDedup, entryDiagnostic, parsePersist, planEntry, pruneDedup, recoveryConfigFromEnv,
   resolveEntryMode, rrFor, scanDue, serializePersist, specsFromQuote,
   type DedupState, type JevSnap, type KronosSnap, type QuoteFields, type RecoveryMode, type RecoveryPersist,
 } from "./recovery.js";
 import { isBeeMagic, LOT } from "./risk.js";
 
-export interface EvolveSig { id: string; bee: "bee1" | "bee2" | "bee3"; magic: number; signal: "buy" | "sell" | null; dist?: number | null; bar?: number; atr?: number; error?: string; tp_r?: number | null }
+export interface EvolveSig { id: string; bee: "bee1" | "bee2" | "bee3"; magic: number; signal: "buy" | "sell" | null; dist?: number | null; bar?: number; atr?: number; error?: string; tp_r?: number | null; source?: "candidate" | "demo_scalp"; diag?: string | null }
 export const MAX_ACTIVE_CANDIDATES = 3;
 /** Evolved SL distance bounds in M5 ATRs (live 29/10: tj#29 sent SL 14.04 = 2.6xATR, ~2x the bees' 1.5xATR risk). */
 export const EVO_MIN_SL_ATR = 1.0, EVO_MAX_SL_ATR = 2.0;
@@ -40,6 +40,7 @@ export class EvolveTrader {
   private lastScan = 0;
   private mode: RecoveryMode = "normal";
   private dedup: DedupState = emptyDedup();
+  private lastScalpOrderBar: number | null = null;
   private loaded = false;
   private cache: { bar: number; signals: EvolveSig[] } | null = null;
   /** Entry gate (mt5/gate.ts) for the candidate's bee; required: no gate -> no trade. */
@@ -86,6 +87,8 @@ export class EvolveTrader {
   private runPy(balance: number, tpR: 1 | 2): Promise<EvolveSig[]> {
     const root = this.d.root ?? "/workspace/evolve";
     const env: NodeJS.ProcessEnv = { PATH: "/usr/bin:/bin", BEEBOTS_DISABLE_BEE1: this.env().BEEBOTS_DISABLE_BEE1 ?? "1" };
+    if (this.env().BEEBOTS_DEMO_1R) env.BEEBOTS_DEMO_1R = this.env().BEEBOTS_DEMO_1R;
+    if (this.env().BEEBOTS_DEMO_ENHANCED_1R) env.BEEBOTS_DEMO_ENHANCED_1R = this.env().BEEBOTS_DEMO_ENHANCED_1R;
     if (this.env().EVOLVE_FEED) env.EVOLVE_FEED = this.env().EVOLVE_FEED;
     return new Promise((res, rej) => execFile(`${root}/.venv/bin/python`, [`${root}/lib/live_signals.py`, String(balance), String(MAX_ACTIVE_CANDIDATES), String(tpR)],
       { cwd: root, timeout: 120_000, env }, (e, out) => {
@@ -189,10 +192,18 @@ export class EvolveTrader {
         entryBlocked: entryBlockedReason(nowMs), forceStop, emergencyStop, forceLoop, relax, gateOk, purposeOk, purposeRelaxed, specs,
         quote: quoteTs != null ? { bid: q.bid, ask: q.ask, tsMs: quoteTs } : null,
         jev: snaps.jev, kronos: snaps.kronos, latencyMs: snaps.latencyMs, dedup: this.dedup, lastTickMs: quoteTs,
+        source: s.source ?? "candidate", diagReason: s.diag ?? null, lastScalpOrderBar: this.lastScalpOrderBar,
       });
       this.dedup = plan.dedup;
+      const diag = entryDiagnostic({
+        mode: this.mode, cfg, nowMs, account: decision.account, bee: s.bee, magic: s.magic, candidateId: s.id,
+        bar: s.bar ?? barSec, signal: side, dist: s.dist ?? null, atr: s.atr ?? null, entry,
+        openCount: 0, openMagics: [], correlated: false, entryBlocked: null, forceStop, emergencyStop, forceLoop, relax,
+        gateOk, purposeOk, specs, quote: quoteTs != null ? { bid: q.bid, ask: q.ask, tsMs: quoteTs } : null,
+        jev: snaps.jev, kronos: snaps.kronos, latencyMs: snaps.latencyMs, dedup: this.dedup, source: s.source ?? "candidate", diagReason: s.diag ?? null,
+      }, plan);
       if (plan.action !== "order" || plan.sl == null || plan.tp == null || !side) {
-        if (plan.reason !== "dedup_evidence" && plan.reason !== "dedup_order" && plan.reason !== "dedup_no_signal") log.info("evolve skip", { id: s.id, mode: this.mode, reason: plan.reason });
+        if (plan.reason !== "dedup_evidence" && plan.reason !== "dedup_order" && plan.reason !== "dedup_no_signal" && plan.reason !== "dedup_done") log.info("evolve skip", diag);
         continue;
       }
       const r = await this.d.exec.market(s.bee, { instId: MT5_INST_ID, side, contracts: LOT, reduceOnly: false,
@@ -202,7 +213,10 @@ export class EvolveTrader {
       if (ok) this.d.db.prepare(`INSERT INTO trade_journal (bee, side, opened_ts, entry_px, sl_px, tp_px, atr, hour_utc, decided_by, status, source, cand, magic, ctx_json)
         VALUES (?,?,?,?,?,?,?,?, 'evolve', 'open', 'evolve', ?, ?, ?)`).run(s.bee, side === "buy" ? "long" : "short", nowMs, entry, plan.sl, plan.tp, s.atr ?? null,
         new Date(nowMs).getUTCHours(), s.id, s.magic, JSON.stringify({ bar: s.bar, dist: plan.slDist, rawDist: s.dist, rr: plan.rr, mode: this.mode, gross: true, feeAdjusted: false }));
-      if (ok) pos.push({ magic: s.magic, type: side } as never);
+      if (ok) {
+        pos.push({ magic: s.magic, type: side } as never);
+        if ((s.source ?? "candidate") === "demo_scalp" && s.bar != null) this.lastScalpOrderBar = s.bar;
+      }
     }
   }
 
