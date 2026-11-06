@@ -53,6 +53,10 @@ def _num_env(v):
     return n if math.isfinite(n) else None
 
 
+def _demo1r_invalid(raw):
+    return raw is not None and str(raw).strip() != "" and raw != "0" and raw != "1"
+
+
 def _add(xs, key):
     if key in xs:
         return list(xs)
@@ -74,8 +78,12 @@ def recovery_config_from_env(env=None):
         maxLatencyMs=RECOVERY_MAX_LATENCY_MS if latency is None else latency,
         maxForecastAgeMs=STALE_VERDICT_MS if forecast is None else forecast,
         disableBee1=env.get("BEEBOTS_DISABLE_BEE1") != "0",
+        demo1r=env.get("BEEBOTS_DEMO_1R") == "1",
+        demo1rInvalid=_demo1r_invalid(env.get("BEEBOTS_DEMO_1R")),
         invalidReason=None,
     )
+    if base["demo1rInvalid"]:
+        return {**base, "invalidReason": "demo_1r_invalid"}
     if enter is None and exit_ is None and eval_raw is None:
         return base
     if enter is None or exit_ is None:
@@ -92,6 +100,60 @@ def recovery_config_from_env(env=None):
     if not (base["maxForecastAgeMs"] > 0) or base["maxForecastAgeMs"] > STALE_VERDICT_MS:
         return {**base, "invalidReason": "recovery_forecast_age_invalid"}
     return {**base, "armed": True, "invalidReason": None}
+
+
+def demo_account(acct, demo):
+    return demo is not None and acct["login"] == demo[0] and acct["server"] == demo[1] and acct["tradeMode"] == "demo"
+
+
+def resolve_entry_mode(balance, prev, cfg, account, demo):
+    if cfg.get("demo1rInvalid"):
+        return dict(mode="normal", event="disarmed", reason="demo_1r_invalid")
+    if cfg.get("demo1r"):
+        if not demo_account(account, demo):
+            return dict(mode="normal", event="disarmed", reason="demo_1r_forbidden")
+        return dict(mode="recovery", event="stay" if prev == "recovery" else "enter_recovery", reason="demo_1r_explicit")
+    return step_recovery_mode(balance, prev, cfg)
+
+
+def commission_per_side_usd(volume_lots, usd_per_lot_per_side):
+    """USD per side after half-up cent rounding. 3.5 per 1.00 lot * 0.01 lot = 0.035 -> 0.04."""
+    if not _finite(volume_lots) or not _finite(usd_per_lot_per_side) or not (volume_lots > 0) or not (usd_per_lot_per_side > 0):
+        return None
+    rate_milli = int(round(usd_per_lot_per_side * 1000))
+    vol_milli = int(round(volume_lots * 1000))
+    if abs(rate_milli - usd_per_lot_per_side * 1000) > 1e-4 or abs(vol_milli - volume_lots * 1000) > 1e-4:
+        return None
+    numer = rate_milli * vol_milli
+    denom = 10000
+    cents = (numer + denom // 2) // denom
+    return cents / 100
+
+
+def commission_round_turn_usd(volume_lots, usd_per_lot_per_side):
+    side = commission_per_side_usd(volume_lots, usd_per_lot_per_side)
+    if side is None:
+        return None
+    return round(side * 200) / 100
+
+
+def commission_round_turn_from_env(env, volume_lots=LOT):
+    per_side = _num_env(env.get("BEEBOTS_COMMISSION_USD_PER_LOT_SIDE"))
+    explicit = _num_env(env.get("BEEBOTS_COMMISSION_RT_USD"))
+    if per_side is None and explicit is None:
+        return dict(ok=False, reason="commission_missing")
+    if (per_side is not None and not (per_side > 0)) or (explicit is not None and not (explicit > 0)):
+        return dict(ok=False, reason="commission_invalid")
+    computed = commission_round_turn_usd(volume_lots, per_side) if per_side is not None else None
+    if per_side is not None and computed is None:
+        return dict(ok=False, reason="commission_invalid")
+    if computed is not None and explicit is not None and abs(computed - explicit) > 0.001:
+        return dict(ok=False, reason="commission_mismatch")
+    usd = explicit if explicit is not None else computed
+    if usd is None or not (usd > 0):
+        return dict(ok=False, reason="commission_invalid")
+    source = "both" if computed is not None and explicit is not None else ("explicit_rt" if explicit is not None else "per_lot_side")
+    return dict(ok=True, usd=usd, source=source)
 
 
 def rr_for(mode):
@@ -333,7 +395,8 @@ def _evidence(p):
         g(q, "tsMs"), g(j, "tsMs"), g(j, "choice"), g(j, "confidence"), g(k, "tsMs"), g(k, "expectedMovePx"),
         "" if p.get("latencyMs") is None else p.get("latencyMs"),
         1 if p.get("correlated") else 0, p.get("entryBlocked") or "", 1 if p.get("forceStop") else 0,
-        1 if p.get("forceLoop") else 0, 1 if p.get("relax") else 0,
+        1 if p.get("emergencyStop") else 0, 1 if p.get("forceLoop") else 0, 1 if p.get("relax") else 0,
+        1 if (p.get("cfg") or {}).get("demo1r") else 0,
         "" if p.get("gateOk") is None else (1 if p.get("gateOk") else 0),
         "" if p.get("purposeOk") is None else (1 if p.get("purposeOk") else 0),
         ".".join(str(m) for m in (p.get("openMagics") or [])), p["account"]["balance"],
@@ -353,19 +416,28 @@ def _remember(p, reason, bucket, key, terminal):
 
 def plan_entry(p, demo):
     key = f"{p['candidateId']}:{p['bar']}"
-    if p.get("forceStop"):
-        return _remember(p, "force_stop", "evidence", _evidence(p), False)
+    cfg = p.get("cfg") or {}
+    if p.get("emergencyStop"):
+        return _remember(p, "emergency_stop", "evidence", _evidence(p), False)
     if p.get("forceLoop"):
         return _remember(p, "force_loop_off", "evidence", _evidence(p), False)
     if p.get("relax") or p.get("purposeRelaxed"):
         return _remember(p, "relax_off", "evidence", _evidence(p), False)
+    if cfg.get("demo1rInvalid"):
+        return _remember(p, "demo_1r_invalid", "evidence", _evidence(p), False)
     acct = p["account"]
-    if demo is None or acct["login"] != demo[0] or acct["server"] != demo[1] or acct["tradeMode"] != "demo":
+    acct_ok = demo_account(acct, demo)
+    if cfg.get("demo1r") and not acct_ok:
+        return _remember(p, "demo_1r_forbidden", "evidence", _evidence(p), False)
+    if not acct_ok:
         return _remember(p, "account_guard", "evidence", _evidence(p), False)
-    cfg = p["cfg"]
-    if p.get("bee") == "bee1" and (cfg.get("disableBee1") or p.get("mode") == "recovery"):
+    own = bool(cfg.get("demo1r") and acct_ok)
+    if p.get("forceStop") and not own:
+        return _remember(p, "force_stop", "evidence", _evidence(p), False)
+    mode = "recovery" if own else p.get("mode")
+    if p.get("bee") == "bee1" and (cfg.get("disableBee1") or mode == "recovery"):
         return _remember(p, "bee1_disabled", "done", key, True)
-    allowed = bees_for_mode(p.get("mode"), cfg.get("disableBee1"))
+    allowed = bees_for_mode(mode, cfg.get("disableBee1"))
     if p.get("bee") not in allowed or bee_of_magic(p.get("magic")) != p.get("bee"):
         return _remember(p, "magic_mismatch", "done", key, True)
     d = p["dedup"]
@@ -392,8 +464,8 @@ def plan_entry(p, demo):
         return _remember(p, "gate", "evidence", ev, False)
     if p.get("purposeOk") is False:
         return _remember(p, "purpose", "evidence", ev, False)
-    rr = rr_for(p["mode"])
-    if p["mode"] == "recovery":
+    rr = rr_for(mode)
+    if mode == "recovery":
         noise = recovery_noise(p["nowMs"], p["signal"], p.get("atr"), p.get("quote"), p.get("jev"), p.get("kronos"), p.get("latencyMs"), cfg)
         if not noise["ok"]:
             return _remember(p, f"noise:{noise['reason']}", "evidence", ev, False)
@@ -419,10 +491,10 @@ def plan_entry(p, demo):
     return dict(action="order", reason="order", terminal=True, modifiesOpenPositions=False, rr=rr, sl=px["sl"], tp=px["tp"], slDist=px["slDist"], tpDist=px["tpDist"], gross=True, feeAdjusted=False, dedup=dedup)
 
 
-def scan_due(armed, mode, now_ms, bar_ts, last_bar, last_scan, interval):
+def scan_due(armed, mode, now_ms, bar_ts, last_bar, last_scan, interval, demo1r=False):
     if bar_ts > last_bar:
         return dict(due=True, kind="new_bar")
-    if armed and mode == "recovery" and now_ms - last_scan >= interval:
+    if (armed or demo1r) and mode == "recovery" and now_ms - last_scan >= interval:
         return dict(due=True, kind="recovery_rescan")
     return dict(due=False, kind="idle")
 
@@ -450,6 +522,10 @@ def handle(req, env=None):
         return recovery_config_from_env(req.get("env") or {})
     if op == "step":
         return step_recovery_mode(req["balance"], req.get("prev"), req["cfg"])
+    if op == "entry_mode":
+        return resolve_entry_mode(req["balance"], req.get("prev"), req["cfg"], req["account"], demo)
+    if op == "commission":
+        return dict(perSide=commission_per_side_usd(req["volume"], req["perLotSide"]), rt=commission_round_turn_usd(req["volume"], req["perLotSide"]))
     if op == "feasibility":
         return assess_feasibility(req["balance"], req.get("atr"), req.get("specs"), req["rr"])
     if op == "noise":
@@ -459,7 +535,7 @@ def handle(req, env=None):
     if op == "balance":
         return resolve_decision_balance(req["account"], req.get("override"), demo)
     if op == "scan":
-        return scan_due(req["armed"], req["mode"], req["nowMs"], req["barTsMs"], req["lastBarTsMs"], req["lastScanMs"], req["evalIntervalMs"])
+        return scan_due(req["armed"], req["mode"], req["nowMs"], req["barTsMs"], req["lastBarTsMs"], req["lastScanMs"], req["evalIntervalMs"], req.get("demo1r") or False)
     if op == "rr":
         return dict(rr=rr_for(req["mode"]))
     if op == "gross":

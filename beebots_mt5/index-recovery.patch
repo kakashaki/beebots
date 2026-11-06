@@ -1,5 +1,5 @@
 --- beebots_mt5/src/index.ts	2026-11-06 10:05:26.000000000 +0000
-+++ beebots_mt5/src/index.ts	2026-11-06 16:09:49.801723193 +0000
++++ beebots_mt5/src/index.ts	2026-11-06 16:51:36.329164533 +0000
 @@ -117,6 +117,8 @@
    const decidedPx = new Map<string, { px: number; at: number }>();
    let openFailed: EngineDeps["openFailed"];
@@ -22,7 +22,7 @@
        setInterval(() => void evolveTrader!.poll(api.lastQuote() ? (api.lastQuote()!.bid + api.lastQuote()!.ask) / 2 : null), 10_000).unref();
      }
      const api = createMt5MarketApi(bridge, Date.now, (c) => { kronos?.onBars(c); const ts = evolve?.onBars(c) ?? 0; if (ts && evolveTrader) void evolveTrader.onBar(ts); });
-@@ -220,22 +226,54 @@
+@@ -220,22 +226,55 @@
      }
      protect = async (_bee, _instId, side) => {
        // SL/TP from a fresh quote (the ticker cache can be ~10 s old), falling back to the cache.
@@ -34,17 +34,17 @@
        const m5 = await api.candles(_instId, "5m", 60);
        const acct = await mt5.accountInfo();
 -      const p = protectionFor(side, side === "buy" ? q.ask : q.bid, m5, acct.balance);
-+      const { planBeeStop, recoveryConfigFromEnv, recoveryNoise, resolveDecisionBalance, specsFromQuote, stepRecoveryMode, parsePersist, serializePersist } = await import("./mt5/recovery.js");
++      const { planBeeStop, recoveryConfigFromEnv, recoveryNoise, balanceForEntry, specsFromQuote, resolveEntryMode, parsePersist, serializePersist } = await import("./mt5/recovery.js");
 +      const { atr: atrOf } = await import("./mt5/protect.js");
 +      const { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync } = await import("node:fs");
 +      const { dirname } = await import("node:path");
 +      const cfg = recoveryConfigFromEnv(process.env);
-+      const decision = resolveDecisionBalance(acct, process.env.BEEBOTS_DEMO_BALANCE_OVERRIDE);
++      const decision = balanceForEntry(acct, process.env.BEEBOTS_DEMO_BALANCE_OVERRIDE, cfg);
 +      if (!decision.ok) { log.warn("recovery balance refused", { reason: decision.reason }); return null; }
 +      const statePath = process.env.BEEBOTS_RECOVERY_STATE || "/workspace/beebots_mt5/data/recovery_mode.json";
 +      let prev: "normal" | "recovery" | null = null;
 +      try { prev = parsePersist(existsSync(statePath) ? readFileSync(statePath, "utf8") : null).mode; } catch { prev = null; }
-+      const stepped = stepRecoveryMode({ balance: decision.balance, prev, cfg });
++      const stepped = resolveEntryMode({ balance: decision.balance, prev, cfg, account: decision.account });
 +      try {
 +        const cur = parsePersist(existsSync(statePath) ? readFileSync(statePath, "utf8") : null);
 +        mkdirSync(dirname(statePath), { recursive: true });
@@ -61,7 +61,8 @@
 +      const planned = planBeeStop({
 +        bee: _bee, mode: stepped.mode, cfg, side, entry, m5, balance: decision.balance, noiseOk,
 +        forceStop: existsSync(process.env.BEEBOTS_FORCE_STOP || "/workspace/beebots_mt5/FORCE_STOP"),
-+        relax: process.env.BEEBOTS_PURPOSEFUL_RELAX === "1", openPositions: [],
++        emergencyStop: process.env.BEEBOTS_EMERGENCY_STOP === "1" || existsSync(process.env.BEEBOTS_EMERGENCY_STOP_FILE || "/workspace/beebots_mt5/EMERGENCY_STOP"),
++        account: acct, relax: process.env.BEEBOTS_PURPOSEFUL_RELAX === "1", openPositions: [],
 +      });
 +      const p = planned ? { slPx: planned.slPx, tpPx: planned.tpPx, slDist: planned.slDist, atr: planned.atr, budgetClamped: planned.budgetClamped } : null;
        { // v5 range fade (owner 29/10 15:52 ICT): in a range regime a new entry is the bizzy fade -> outer third only, SL beyond the edge
@@ -83,7 +84,7 @@
        return p ? { slPx: p.slPx, tpPx: p.tpPx } : null;
      };
    } else {
-@@ -353,11 +391,22 @@
+@@ -353,11 +392,22 @@
    // MODE=mt5 entry gate (sandwich rule) shared by bees, evolve candidates and (via data/gate_state.json) the director CLI.
    let entryGateFn: import("./engine.js").EngineDeps["entryGate"] | undefined;
    if (cfg.mode === "mt5") {

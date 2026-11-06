@@ -16,24 +16,80 @@ Normal behaviour stays in place until both thresholds are set and valid: take-pr
 
 An earlier figure near $15 was only a rough sketch of whether a stop might fit. It is **not** the default and it is **not** safe capital. The code computes a separate feasibility floor from ATR, the 1 ATR stop floor, the 25% ceiling, contract size, minimum volume, minimum stop, spread, slippage, and round-turn commission. A balance that cannot fund that floor (the checked example is $2.53 under the fixture specs) is skipped.
 
-## Arm it (demo box only, after review)
+## Stop files
 
-Leave the process flat and `FORCE_STOP` in place until you intend to allow new entries. Do not start the force loop. Do not set `BEEBOTS_PURPOSEFUL_RELAX`.
+`FORCE_STOP` stays on disk. It keeps the force loop off. This patch does not delete it and does not start the force loop. Own-signal gross 1R on the authorized demo is a separate switch (`BEEBOTS_DEMO_1R=1`). Without that switch, `FORCE_STOP` still skips evolve own-signals (`force_stop`), which is why a file left in place produces no trades.
 
-1. Copy `beebots_mt5/src/mt5/recovery.ts`, `protect.ts`, `evolve.ts`, `evolve/lib/recovery.py`, `evolve/lib/common.py`, `evolve/lib/live_signals.py`, and `beebots_mt5/mql5/BeeBridge.mq5` onto the box paths of the same names. Recompile BeeBridge so quotes include stops, freeze, point, and volume.
-2. From the box repo root, apply the engine hook: `patch -p0 < beebots_mt5/index-recovery.patch`.
-3. Set explicit dollars, with exit above enter, only after you have read a live quote's specs. Example shape, not a recommendation: `BEEBOTS_RECOVERY_ENTER_USD` and `BEEBOTS_RECOVERY_EXIT_USD`.
-4. Set `BEEBOTS_COMMISSION_RT_USD` and `BEEBOTS_SLIPPAGE_PRICE` from the broker specification. Recovery will not send an order while either is missing (`specs_unverified`).
-5. Leave `BEEBOTS_DEMO_BALANCE_OVERRIDE` unset on the running demo. It exists so a high demo balance can be replaced **in the decision only** during a function test. It is refused on any account that is not this demo, and a refusal fails closed (no new entry).
-6. Restart the Node process so it loads the new files. Removing `FORCE_STOP` is a separate decision and is not part of this patch.
+`EMERGENCY_STOP` (or `BEEBOTS_EMERGENCY_STOP=1`) is the full halt. It blocks own-signals even when demo 1R is on. This patch does not create that file. Real accounts and any other login are refused (`demo_1r_forbidden`).
 
-While the thresholds are armed, the existing poll reads the account on the recovery interval so a drop or a recovery is noticed without waiting for the next M5 bar. That read does not place an order while the mode is normal. Cloud tests in this repo do not talk to the broker and are not demo validation.
+## Explicit demo 1R (authorized demo only)
+
+Do not set `BEEBOTS_RECOVERY_ENTER_USD` above the live balance to force 1R. Do not set `BEEBOTS_DEMO_BALANCE_OVERRIDE`. The process reads the broker balance and uses that figure for the 25% stop ceiling. A balance reported at review was 2082.57; that number is not a threshold and is not copied into the env.
+
+The flag is accepted only when login, server, and trade mode match the demo guard in `beebots_mt5/src/mt5/risk.ts` (login 53109826, server `ICMarketsSC-Demo`, trade mode demo).
+
+Observed quote geometry, already on the refreshed BeeBridge quote: volume min 0.01, step 0.01, contract size 100, stops level 0, digits 2, floating spread. Those fields are read from the quote. They are not hardcoded as a permission to trade.
+
+### Commission units
+
+Native spec: **3.5 USD per 1.00 lot, one side**, before rounding.
+
+`BEEBOTS_COMMISSION_USD_PER_LOT_SIDE` is that per-side rate.
+
+Each side is rounded half-up to the cent, then the two sides are added. At 0.01 lot, 3.5 × 0.01 = 0.035, which rounds to **0.04 per side**. History deals showed -0.04 on the entry and -0.04 on the exit, so the round trip at 0.01 lot is **0.08 USD**. The unrounded 0.07 is not used. Other volumes round each side again (0.02 lot is 0.07 + 0.07 = 0.14, not 0.16).
+
+`BEEBOTS_COMMISSION_RT_USD` is the round trip **in USD at 0.01 lot after that rounding**. It is not USD per 1.00 lot and not per side. If both variables are set they must agree (3.5 per side and 0.08 round trip). A 0.07 value next to 3.5 is rejected.
+
+### Slippage
+
+Executed deals do not include the requested price, so slippage is **not measured** and is not zero. `BEEBOTS_SLIPPAGE_PRICE` is a positive price-distance **assumption per side** that you set on purpose. `0` or a missing value leaves `specs_unverified` and sends nothing.
+
+A conservative demo-test assumption is `0.30` (price units, one side). That is not a broker fact. A larger number only makes the cost and “stop must clear spread + slippage” checks stricter. It does not widen the take-profit, lower the 1 ATR floor, or raise the 25% ceiling. Gross 1R stays take-profit distance = stop distance.
+
+### Env that arms own-signal 1R
+
+Nothing is armed until these are actually in the process environment. Copy the files, apply the patch, then set:
+
+```
+BEEBOTS_DEMO_1R=1
+BEEBOTS_COMMISSION_USD_PER_LOT_SIDE=3.5
+BEEBOTS_COMMISSION_RT_USD=0.08
+BEEBOTS_SLIPPAGE_PRICE=0.30
+```
+
+Leave unset: `BEEBOTS_RECOVERY_ENTER_USD`, `BEEBOTS_RECOVERY_EXIT_USD`, `BEEBOTS_DEMO_BALANCE_OVERRIDE`, `BEEBOTS_PURPOSEFUL_RELAX`.
+
+Leave present: `FORCE_STOP`. Leave absent unless you want a full halt: `EMERGENCY_STOP`.
+
+Bee1 stays off. Force loop stays off.
+
+## Deploy steps (demo box only, after review)
+
+1. Copy onto the box, where `beebots_mt5` and `evolve` are siblings:
+   - `beebots_mt5/src/mt5/recovery.ts`
+   - `beebots_mt5/src/mt5/protect.ts`
+   - `beebots_mt5/src/mt5/evolve.ts`
+   - `beebots_mt5/mql5/BeeBridge.mq5` (already rebuilt with stop/freeze/point/volume on the quote)
+   - `evolve/lib/recovery.py`
+   - `evolve/lib/common.py`
+   - `evolve/lib/live_signals.py`
+   - `beebots_mt5/index-recovery.patch`
+2. From `/workspace`, apply `patch -p0 < beebots_mt5/index-recovery.patch`.
+3. Put the env block above in the demo process environment. Restart Node so it loads the files.
+4. Cloud tests do not talk to the broker. On the box, confirm before expecting an order:
+   - log line for bee2/bee3 is not `reason=force_stop` once `BEEBOTS_DEMO_1R=1` is loaded
+   - a missing commission or slippage line is `specs_unverified` / `infeasible:specs_unverified`
+   - the balance used for the 25% check is the live account balance, not a simulated one
+   - `FORCE_STOP` still exists and the force loop process is not running
+   - no modify of an open position’s SL/TP
+
+Balance-band recovery (`BEEBOTS_RECOVERY_ENTER_USD` / `EXIT`) is a different switch and is not how this demo test turns 1R on.
 
 ## Roll back
 
 1. Restore the previous `protect.ts`, `evolve.ts`, `index.ts`, `BeeBridge.mq5`, `evolve/lib/common.py`, and `evolve/lib/live_signals.py`. Remove `recovery.ts` and `evolve/lib/recovery.py` (or check out the previous revision).
-2. Unset `BEEBOTS_RECOVERY_ENTER_USD`, `BEEBOTS_RECOVERY_EXIT_USD`, `BEEBOTS_DEMO_BALANCE_OVERRIDE`, `BEEBOTS_COMMISSION_RT_USD`, and `BEEBOTS_SLIPPAGE_PRICE`.
-3. Delete `data/recovery_mode.json` if you do not want the next build to see a saved mode. The old code ignores it. Do not delete `FORCE_STOP`.
+2. Unset `BEEBOTS_DEMO_1R`, `BEEBOTS_RECOVERY_ENTER_USD`, `BEEBOTS_RECOVERY_EXIT_USD`, `BEEBOTS_DEMO_BALANCE_OVERRIDE`, `BEEBOTS_COMMISSION_USD_PER_LOT_SIDE`, `BEEBOTS_COMMISSION_RT_USD`, and `BEEBOTS_SLIPPAGE_PRICE`.
+3. Delete `data/recovery_mode.json` if you do not want the next build to see a saved mode. The old code ignores it. Do not delete `FORCE_STOP`. Do not create or delete `EMERGENCY_STOP` as part of rollback unless you added it yourself.
 4. Restart the process. Open positions keep whatever SL/TP the server already has; rollback does not modify them either.
 5. `BEEBOTS_DISABLE_BEE1=0` restores bee1 in the Python signal list for a normal (2R) run. Recovery still refuses bee1.
 

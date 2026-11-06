@@ -13,8 +13,8 @@ import type { Mt5Executor } from "./executor.js";
 import { entryBlockedReason } from "./marketgate.js";
 import { MT5_INST_ID } from "./market.js";
 import {
-  cachedBarSignals, emptyDedup, parsePersist, planEntry, pruneDedup, recoveryConfigFromEnv, resolveDecisionBalance,
-  rrFor, scanDue, serializePersist, specsFromQuote, stepRecoveryMode,
+  balanceForEntry, cachedBarSignals, emptyDedup, parsePersist, planEntry, pruneDedup, recoveryConfigFromEnv,
+  resolveEntryMode, rrFor, scanDue, serializePersist, specsFromQuote,
   type DedupState, type JevSnap, type KronosSnap, type QuoteFields, type RecoveryMode, type RecoveryPersist,
 } from "./recovery.js";
 import { isBeeMagic, LOT } from "./risk.js";
@@ -32,6 +32,7 @@ export function evoSlDist(dist: number, atr: number | null | undefined): number 
 }
 
 const stopFile = () => process.env.BEEBOTS_FORCE_STOP || "/workspace/beebots_mt5/FORCE_STOP";
+const emergencyFile = () => process.env.BEEBOTS_EMERGENCY_STOP_FILE || "/workspace/beebots_mt5/EMERGENCY_STOP";
 const persistFile = () => process.env.BEEBOTS_RECOVERY_STATE || "/workspace/beebots_mt5/data/recovery_mode.json";
 
 export class EvolveTrader {
@@ -98,7 +99,7 @@ export class EvolveTrader {
     if (this.busy) return;
     this.loadPersist();
     const cfg = recoveryConfigFromEnv(this.env());
-    const due = scanDue({ armed: cfg.armed, mode: this.mode, nowMs, barTsMs, lastBarTsMs: this.lastBar, lastScanMs: this.lastScan, evalIntervalMs: cfg.evalIntervalMs });
+    const due = scanDue({ armed: cfg.armed, demo1r: cfg.demo1r, mode: this.mode, nowMs, barTsMs, lastBarTsMs: this.lastBar, lastScanMs: this.lastScan, evalIntervalMs: cfg.evalIntervalMs });
     if (!due.due) return;
     if (barTsMs > this.lastBar) {
       this.cache = null;
@@ -121,16 +122,16 @@ export class EvolveTrader {
     if (this.busy || this.lastBar <= 0) return;
     this.loadPersist();
     const cfg = recoveryConfigFromEnv(this.env());
-    if (!cfg.armed || nowMs - this.lastScan < cfg.evalIntervalMs) return;
+    if ((!cfg.armed && !cfg.demo1r) || cfg.demo1rInvalid || nowMs - this.lastScan < cfg.evalIntervalMs) return;
     this.lastScan = nowMs;
     this.busy = true;
     try {
-      // While still normal, only step the mode. A new recovery does the cached-bar check; staying normal sends nothing.
-      if (this.mode !== "recovery") {
+      // Threshold mode peeks the live balance and stays quiet while normal. Explicit demo 1R always rechecks own-signals.
+      if (!cfg.demo1r && this.mode !== "recovery") {
         const broker = await this.d.exec.accountInfo();
-        const decision = resolveDecisionBalance(broker, this.env().BEEBOTS_DEMO_BALANCE_OVERRIDE);
+        const decision = balanceForEntry(broker, this.env().BEEBOTS_DEMO_BALANCE_OVERRIDE, cfg);
         if (!decision.ok) { log.warn("evolve balance refused", { reason: decision.reason }); return; }
-        this.mode = stepRecoveryMode({ balance: decision.balance, prev: this.mode, cfg }).mode;
+        this.mode = resolveEntryMode({ balance: decision.balance, prev: this.mode, cfg, account: decision.account }).mode;
         if (this.mode !== "recovery") return;
       }
       await this.evaluate(this.lastBar, nowMs, "recovery");
@@ -141,9 +142,9 @@ export class EvolveTrader {
   private async evaluate(barTsMs: number, nowMs: number, placement: "bar" | "recovery"): Promise<void> {
     const cfg = recoveryConfigFromEnv(this.env());
     const broker = await this.d.exec.accountInfo();
-    const decision = resolveDecisionBalance(broker, this.env().BEEBOTS_DEMO_BALANCE_OVERRIDE);
+    const decision = balanceForEntry(broker, this.env().BEEBOTS_DEMO_BALANCE_OVERRIDE, cfg);
     if (!decision.ok) { log.warn("evolve balance refused", { reason: decision.reason }); return; }
-    const stepped = stepRecoveryMode({ balance: decision.balance, prev: this.mode, cfg });
+    const stepped = resolveEntryMode({ balance: decision.balance, prev: this.mode, cfg, account: decision.account });
     this.mode = stepped.mode;
     if (placement === "recovery" && this.mode !== "recovery") return;
     const rr = rrFor(this.mode);
@@ -156,7 +157,8 @@ export class EvolveTrader {
     const quoteTs = q.time != null && q.time < 1e12 ? q.time * 1000 : q.time;
     const snapsFor = this.d.snapshots ?? (() => ({ jev: null, kronos: null, latencyMs: null as number | null }));
     const specs = this.mode === "recovery" ? specsFromQuote({ ...q, time: quoteTs }, this.env()) : null;
-    const forceStop = existsSync(stopFile()); // never deleted here
+    const forceStop = existsSync(stopFile()); // force-loop kill switch; never deleted here
+    const emergencyStop = this.env().BEEBOTS_EMERGENCY_STOP === "1" || existsSync(emergencyFile());
     const relax = this.env().BEEBOTS_PURPOSEFUL_RELAX === "1";
     const forceLoop = false;
     for (const s of sigs) {
@@ -184,7 +186,7 @@ export class EvolveTrader {
         bar: s.bar ?? barSec, signal: side, dist: s.dist ?? null, atr: s.atr ?? null, entry,
         openCount: pos.filter((p) => isBeeMagic(p.magic)).length, openMagics: pos.map((p) => p.magic),
         correlated: stacked || corrHit,
-        entryBlocked: entryBlockedReason(nowMs), forceStop, forceLoop, relax, gateOk, purposeOk, purposeRelaxed, specs,
+        entryBlocked: entryBlockedReason(nowMs), forceStop, emergencyStop, forceLoop, relax, gateOk, purposeOk, purposeRelaxed, specs,
         quote: quoteTs != null ? { bid: q.bid, ask: q.ask, tsMs: quoteTs } : null,
         jev: snaps.jev, kronos: snaps.kronos, latencyMs: snaps.latencyMs, dedup: this.dedup, lastTickMs: quoteTs,
       });

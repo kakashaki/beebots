@@ -1,15 +1,18 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { Candle } from "../market/types.js";
 import { KRONOS_AGREE_ATR, MIN_JEV_CONF } from "./gate.js";
 import { STALE_VERDICT_MS } from "./latency.js";
 import { atr, MIN_SL_ATR, protectionFor, RR, SL_ATR_MULT } from "./protect.js";
 import {
-  ACTIVE_BEES, assessFeasibility, beesForMode, cachedBarSignals, clampEvolveSl, emptyDedup, explainFeasibility,
-  freshCache, grossPrices, MAX_SL_FRACTION, NORMAL_RR, openProtectionsUntouched, parsePersist, planBeeStop, planEntry,
-  pruneDedup, RECOVERY_RR, recoveryConfigFromEnv, recoveryNoise, resolveDecisionBalance, rrFor, scanDue,
-  serializePersist, specsFromQuote, stepRecoveryMode, type PlanInput, type SymbolSpecs,
+  ACTIVE_BEES,   assessFeasibility, balanceForEntry, beesForMode, cachedBarSignals, clampEvolveSl, commissionPerSideUsd,
+  commissionRoundTurnFromEnv, commissionRoundTurnUsd, emptyDedup, explainFeasibility, freshCache, grossPrices,
+  MAX_SL_FRACTION, NORMAL_RR, openProtectionsUntouched, parsePersist, planBeeStop, planEntry, pruneDedup, RECOVERY_RR,
+  recoveryConfigFromEnv, recoveryNoise, resolveDecisionBalance, resolveEntryMode, rrFor, scanDue, serializePersist,
+  specsFromQuote, stepRecoveryMode, type PlanInput, type SymbolSpecs,
 } from "./recovery.js";
 import { checkOrder, DEMO_LOGIN, DEMO_SERVER, LOT } from "./risk.js";
 
@@ -48,8 +51,21 @@ function plan(over: Partial<PlanInput> = {}): PlanInput {
   };
 }
 
+/** Sibling of beebots_mt5 on the box (`/workspace/evolve`) and in this repo. Not cwd-relative. */
+export function evolveRecoveryScript(): string {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    process.env.EVOLVE_ROOT ? join(process.env.EVOLVE_ROOT, "lib", "recovery.py") : "",
+    "/workspace/evolve/lib/recovery.py",
+    join(here, "../../../evolve/lib/recovery.py"),
+  ].filter((p) => p.length > 0);
+  const hit = candidates.find((p) => existsSync(p));
+  if (!hit) throw new Error(`recovery.py not found (tried ${candidates.join(", ")})`);
+  return hit;
+}
+
 function py(req: unknown): Record<string, unknown> {
-  const r = spawnSync("python3", ["evolve/lib/recovery.py"], {
+  const r = spawnSync("python3", [evolveRecoveryScript()], {
     input: JSON.stringify(req), encoding: "utf8",
     env: { PATH: process.env.PATH ?? "", BEEBOTS_DEMO_LOGIN: String(DEMO_LOGIN), BEEBOTS_DEMO_SERVER: DEMO_SERVER },
   });
@@ -281,6 +297,96 @@ describe("demo balance override", () => {
   });
 });
 
+const LIVE = 2082.57;
+const demo1r = recoveryConfigFromEnv({ BEEBOTS_DEMO_1R: "1" });
+const liveQuote = {
+  bid: 4045, ask: 4045.22, contract_size: 100, point: 0.01, volume_min: 0.01, volume_step: 0.01,
+  volume_max: 50, stops_level: 0, freeze_level: 0, digits: 2,
+};
+
+describe("explicit demo 1R at the live balance", () => {
+  it("turns on gross 1R without a balance band and without a fake balance", () => {
+    expect(demo1r.armed).toBe(false);
+    expect(demo1r.demo1r).toBe(true);
+    expect(demo1r.enterUsd).toBeNull();
+    const stepped = resolveEntryMode({ balance: LIVE, prev: null, cfg: demo1r, account: { ...demo, balance: LIVE } });
+    expect(stepped).toMatchObject({ mode: "recovery", reason: "demo_1r_explicit" });
+    expect(stepRecoveryMode({ balance: LIVE, prev: null, cfg: demo1r }).mode).toBe("normal");
+    const bal = balanceForEntry({ ...demo, balance: LIVE }, undefined, demo1r);
+    expect(bal).toMatchObject({ ok: true, balance: LIVE, source: "broker" });
+    expect(balanceForEntry({ ...demo, balance: LIVE }, "15", demo1r)).toMatchObject({ ok: false, reason: "demo_1r_uses_broker_balance" });
+    expect(resolveEntryMode({ balance: LIVE, prev: null, cfg: demo1r, account: { ...demo, tradeMode: "real", balance: LIVE } })).toMatchObject({ mode: "normal", reason: "demo_1r_forbidden" });
+    expect(recoveryConfigFromEnv({ BEEBOTS_DEMO_1R: "yes" }).demo1rInvalid).toBe(true);
+  });
+  it("prices 1R on the real balance, keeps the 25% ceiling, and does not shrink the stop", () => {
+    const spec = specs({ stopsLevelPoints: 0, spreadPrice: 0.22, slippagePrice: 0.3, commissionRoundTurnUsd: 0.08 });
+    const order = planEntry(plan({
+      mode: "normal", cfg: demo1r, account: { ...demo, balance: LIVE }, forceStop: true, specs: spec,
+    }));
+    expect(order.action).toBe("order");
+    expect(order.rr).toBe(1);
+    expect(order.tp).toBeCloseTo(4050.1, 10);
+    expect(order.sl).toBeCloseTo(4040.1, 10);
+    expect(order.feeAdjusted).toBe(false);
+    expect(assessFeasibility({ balance: LIVE, atr: 3000, specs: spec, rr: 1 }).reason).toBe("floor_exceeds_25pct_ceiling");
+    const cap = MAX_SL_FRACTION * LIVE;
+    expect(checkOrder({ symbol: "XAUUSD", side: "buy", volume: 0.01, price: 4045.1, sl: 4045.1 - (cap + 1), tp: 4100 }, { ...demo, balance: LIVE }, 0).ok).toBe(false);
+    const same = protectionFor("buy", 2700, bars(30, 2), LIVE)!;
+    const one = protectionFor("buy", 2700, bars(30, 2), LIVE, 2, 1)!;
+    expect(one.slPx).toBe(same.slPx);
+    expect(one.tpPx - 2700).toBe(2700 - one.slPx);
+  });
+  it("lets own-signals past FORCE_STOP only for this demo, and still blocks force and a full halt", () => {
+    const spec = specs({ stopsLevelPoints: 0, slippagePrice: 0.3, commissionRoundTurnUsd: 0.08 });
+    expect(planEntry(plan({ forceStop: true, cfg: armed })).reason).toBe("force_stop");
+    expect(planEntry(plan({ cfg: demo1r, account: { ...demo, balance: LIVE }, forceStop: true, forceLoop: true, specs: spec })).reason).toBe("force_loop_off");
+    expect(planEntry(plan({ cfg: demo1r, account: { ...demo, tradeMode: "real", balance: LIVE }, forceStop: true })).reason).toBe("demo_1r_forbidden");
+    expect(planEntry(plan({ cfg: demo1r, account: { ...demo, balance: LIVE }, forceStop: true, emergencyStop: true, specs: spec })).reason).toBe("emergency_stop");
+    expect(planEntry(plan({ cfg: demo1r, account: { ...demo, balance: LIVE }, forceStop: true, signal: null, specs: spec })).reason).toBe("no_signal");
+    expect(planEntry(plan({ cfg: demo1r, account: { ...demo, balance: LIVE }, forceStop: true, bee: "bee1", magic: 530105, specs: spec })).reason).toBe("bee1_disabled");
+    const first = planEntry(plan({ cfg: demo1r, account: { ...demo, balance: LIVE }, forceStop: true, specs: spec }));
+    expect(planEntry(plan({ cfg: demo1r, account: { ...demo, balance: LIVE }, forceStop: true, specs: spec, dedup: first.dedup })).reason).toBe("dedup_order");
+    const stop = planBeeStop({
+      bee: "bee2", mode: "normal", cfg: demo1r, side: "buy", entry: 2700, m5: bars(30, 2), balance: LIVE,
+      noiseOk: true, forceStop: true, account: { ...demo, balance: LIVE }, relax: false, openPositions: [{ sl: 1, tp: 2 }],
+    });
+    expect(stop?.rr).toBe(1);
+    expect(stop?.modifiesOpenPositions).toBe(false);
+    expect(planBeeStop({
+      bee: "bee2", mode: "normal", cfg: demo1r, side: "buy", entry: 2700, m5: bars(30, 2), balance: LIVE,
+      noiseOk: true, forceStop: true, emergencyStop: true, account: demo, relax: false, openPositions: [],
+    })).toBeNull();
+  });
+});
+
+describe("verified commission rounding and explicit slippage", () => {
+  it("rounds each side to the cent: 3.5/lot at 0.01 is 0.08 round trip, not 0.07", () => {
+    expect(commissionPerSideUsd(0.01, 3.5)).toBe(0.04);
+    expect(commissionRoundTurnUsd(0.01, 3.5)).toBe(0.08);
+    expect(commissionRoundTurnUsd(0.02, 3.5)).toBe(0.14);
+    expect(commissionRoundTurnUsd(0.03, 3.5)).toBe(0.22);
+    expect(commissionRoundTurnFromEnv({ BEEBOTS_COMMISSION_USD_PER_LOT_SIDE: "3.5" }, 0.01)).toMatchObject({ ok: true, usd: 0.08, source: "per_lot_side" });
+    expect(commissionRoundTurnFromEnv({ BEEBOTS_COMMISSION_RT_USD: "0.08" }, 0.01)).toMatchObject({ ok: true, usd: 0.08, source: "explicit_rt" });
+    expect(commissionRoundTurnFromEnv({ BEEBOTS_COMMISSION_USD_PER_LOT_SIDE: "3.5", BEEBOTS_COMMISSION_RT_USD: "0.08" }, 0.01)).toMatchObject({ ok: true, source: "both" });
+    expect(commissionRoundTurnFromEnv({ BEEBOTS_COMMISSION_USD_PER_LOT_SIDE: "3.5", BEEBOTS_COMMISSION_RT_USD: "0.07" }, 0.01)).toMatchObject({ ok: false, reason: "commission_mismatch" });
+    expect(commissionRoundTurnFromEnv({ BEEBOTS_COMMISSION_RT_USD: "0" }, 0.01).ok).toBe(false);
+    expect(commissionRoundTurnFromEnv({}, 0.01)).toMatchObject({ ok: false, reason: "commission_missing" });
+  });
+  it("keeps specs unverified until a positive slippage assumption is set", () => {
+    const env = { BEEBOTS_COMMISSION_USD_PER_LOT_SIDE: "3.5", BEEBOTS_SLIPPAGE_PRICE: "0.30" };
+    const got = specsFromQuote(liveQuote, env);
+    expect(got).toMatchObject({ contractSize: 100, volumeMin: 0.01, volumeStep: 0.01, stopsLevelPoints: 0, digits: 2, commissionRoundTurnUsd: 0.08, slippagePrice: 0.3 });
+    expect(specsFromQuote(liveQuote, { BEEBOTS_COMMISSION_USD_PER_LOT_SIDE: "3.5" })).toBeNull();
+    expect(specsFromQuote(liveQuote, { BEEBOTS_COMMISSION_USD_PER_LOT_SIDE: "3.5", BEEBOTS_SLIPPAGE_PRICE: "0" })).toBeNull();
+    expect(specsFromQuote(liveQuote, { BEEBOTS_COMMISSION_RT_USD: "0.08", BEEBOTS_SLIPPAGE_PRICE: "0.30" })?.commissionRoundTurnUsd).toBe(0.08);
+    const order = planEntry(plan({
+      cfg: demo1r, account: { ...demo, balance: LIVE }, forceStop: true, specs: got,
+    }));
+    expect(order.action).toBe("order");
+    expect(order.tp! - 4045.1).toBeCloseTo(4045.1 - order.sl!, 10);
+  });
+});
+
 describe("python parity", () => {
   it("matches mode, feasibility, noise, prices, and the order plan", () => {
     const cfg = armed;
@@ -308,6 +414,12 @@ describe("python parity", () => {
       { op: "plan", body: { plan: plan({ signal: null }) }, pick: ["action", "reason"] },
       { op: "plan", body: { plan: plan({ bee: "bee1", magic: 530105 }) }, pick: ["reason"] },
       { op: "plan", body: { plan: plan({ mode: "normal", quote: null, jev: null, kronos: null, latencyMs: null, specs: null }) }, pick: ["action", "rr", "tp"] },
+      { op: "entry_mode", body: { balance: LIVE, prev: null, cfg: demo1r, account: { ...demo, balance: LIVE } }, pick: ["mode", "reason"] },
+      { op: "entry_mode", body: { balance: LIVE, prev: null, cfg: demo1r, account: { ...demo, tradeMode: "real", balance: LIVE } }, pick: ["mode", "reason"] },
+      { op: "commission", body: { volume: 0.01, perLotSide: 3.5 }, pick: ["perSide", "rt"] },
+      { op: "commission", body: { volume: 0.03, perLotSide: 3.5 }, pick: ["perSide", "rt"] },
+      { op: "plan", body: { plan: plan({ cfg: demo1r, account: { ...demo, balance: LIVE }, forceStop: true, specs: specs({ stopsLevelPoints: 0, slippagePrice: 0.3, commissionRoundTurnUsd: 0.08 }) }) }, pick: ["action", "rr", "reason", "sl", "tp"] },
+      { op: "plan", body: { plan: plan({ cfg: demo1r, account: { ...demo, balance: LIVE }, forceStop: true, emergencyStop: true }) }, pick: ["action", "reason"] },
     ];
     for (const c of cases) {
       const got = py({ op: c.op, ...c.body });
@@ -323,6 +435,8 @@ function localOp(op: string, body: Record<string, unknown>): Record<string, unkn
   if (op === "gross") return { dist: body.tpR == null ? 2 * (body.dist as number) : (body.tpR as number) * (body.dist as number) };
   if (op === "bees") return { bees: beesForMode(body.mode as "normal" | "recovery", body.disableBee1 as boolean) };
   if (op === "step") return asRec(stepRecoveryMode({ balance: body.balance as number, prev: body.prev as "normal" | "recovery" | null, cfg: body.cfg as never }));
+  if (op === "entry_mode") return asRec(resolveEntryMode({ balance: body.balance as number, prev: body.prev as "normal" | "recovery" | null, cfg: body.cfg as never, account: body.account as never }));
+  if (op === "commission") return { perSide: commissionPerSideUsd(body.volume as number, body.perLotSide as number), rt: commissionRoundTurnUsd(body.volume as number, body.perLotSide as number) };
   if (op === "config") return asRec(recoveryConfigFromEnv(body.env as never));
   if (op === "feasibility") return asRec(assessFeasibility({ balance: body.balance as number, atr: body.atr as number, specs: body.specs as SymbolSpecs, rr: body.rr as 1 | 2 }));
   if (op === "noise") return asRec(recoveryNoise(body as never));
@@ -333,12 +447,18 @@ function localOp(op: string, body: Record<string, unknown>): Record<string, unkn
 }
 
 describe("deploy wiring", () => {
-  it("keeps the evolve hook on the recovery planner, force loop off, and FORCE_STOP in place", () => {
+  it("resolves evolve/lib next to beebots_mt5, not only from the process cwd", () => {
+    const script = evolveRecoveryScript();
+    expect(script.endsWith(`${join("evolve", "lib", "recovery.py")}`)).toBe(true);
+    expect(existsSync(script)).toBe(true);
+  });
+  it("keeps the evolve hook on the recovery planner, force loop off, and both stop files untouched", () => {
     const src = readFileSync(new URL("./evolve.ts", import.meta.url), "utf8");
     expect(src).toContain("planEntry");
     expect(src).toContain("cachedBarSignals");
     expect(src).toContain("forceLoop = false");
     expect(src).toContain("existsSync(stopFile())");
+    expect(src).toContain("existsSync(emergencyFile())");
     expect(src).not.toContain("unlink");
     expect(src).not.toContain("TP_R");
     const py = readFileSync("evolve/lib/live_signals.py", "utf8");

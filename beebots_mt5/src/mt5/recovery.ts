@@ -5,7 +5,7 @@ import { kronosCertain, kronosDelta, KRONOS_AGREE_ATR, KRONOS_CERT_AGREE, KRONOS
 import { STALE_VERDICT_MS } from "./latency.js";
 import type { Candle } from "../market/types.js";
 import { protectionFor, RR, MIN_SL_ATR } from "./protect.js";
-import { checkOrder, DEMO_LOGIN, DEMO_SERVER, LOT, MAX_SL_FRACTION, CONTRACT_SIZE, type AccountInfo } from "./risk.js";
+import { checkOrder, DEMO_LOGIN, DEMO_SERVER, LOT, MAX_SL_FRACTION, CONTRACT_SIZE, type AccountInfo, type Check } from "./risk.js";
 
 export const NORMAL_RR = RR;
 export const RECOVERY_RR = 1;
@@ -29,6 +29,12 @@ export interface RecoveryEnvConfig {
   maxForecastAgeMs: number;
   /** Bee1 stays out of this deploy. Recovery refuses bee1 even if this is turned off. */
   disableBee1: boolean;
+  /**
+   * Explicit demo-only gross 1R. Independent of the balance band.
+   * Only exact "1" enables it. Any other non-empty value is invalid and fails closed.
+   */
+  demo1r: boolean;
+  demo1rInvalid: boolean;
   invalidReason: string | null;
 }
 
@@ -48,6 +54,17 @@ const numEnv = (v: string | undefined): number | null => {
   return Number.isFinite(n) ? n : null;
 };
 const addKey = (xs: readonly string[], key: string): string[] => (xs.includes(key) ? [...xs] : [...xs, key].sort());
+const demo1rInvalid = (raw: string | undefined): boolean => raw != null && raw.trim() !== "" && raw !== "0" && raw !== "1";
+
+export function demoAccount(acct: { login: number; server: string; tradeMode: string }): boolean {
+  return acct.login === DEMO_LOGIN && acct.server === DEMO_SERVER && acct.tradeMode === "demo";
+}
+
+/** `Check.reason` only on the rejected arm. `=== false` keeps the discriminant narrow for tsc. */
+export function orderRejectReason(c: Check): string | null {
+  if (c.ok === false) return c.reason;
+  return null;
+}
 
 /** Explicit env only. Missing or inconsistent thresholds leave the mode disarmed (normal RR, bar cadence). */
 export function recoveryConfigFromEnv(env: Record<string, string | undefined> = process.env): RecoveryEnvConfig {
@@ -66,8 +83,11 @@ export function recoveryConfigFromEnv(env: Record<string, string | undefined> = 
     maxLatencyMs: latency ?? RECOVERY_MAX_LATENCY_MS,
     maxForecastAgeMs: forecast ?? RECOVERY_MAX_FORECAST_AGE_MS,
     disableBee1: env.BEEBOTS_DISABLE_BEE1 !== "0",
+    demo1r: env.BEEBOTS_DEMO_1R === "1",
+    demo1rInvalid: demo1rInvalid(env.BEEBOTS_DEMO_1R),
     invalidReason: null,
   };
+  if (base.demo1rInvalid) return { ...base, invalidReason: "demo_1r_invalid" };
   if (enter == null && exit == null && evalRaw == null) return base;
   if (enter == null || exit == null) return { ...base, invalidReason: "recovery_threshold_incomplete" };
   if (!(enter > 0) || !(exit > enter)) return { ...base, invalidReason: "recovery_threshold_invalid" };
@@ -109,6 +129,65 @@ export function stepRecoveryMode(input: { balance: number; prev: RecoveryMode | 
   }
   if (prev === "recovery") return { mode: "recovery", event: "stay", reason: "hysteresis_hold_recovery" };
   return { mode: "normal", event: "stay", reason: prev == null ? "cold_start_band_normal" : "hysteresis_hold_normal" };
+}
+
+/**
+ * Explicit demo 1R ignores the balance band and uses the live balance only for risk.
+ * A non-demo account is refused. Threshold recovery is unchanged when the flag is off.
+ */
+export function resolveEntryMode(input: { balance: number; prev: RecoveryMode | null; cfg: RecoveryEnvConfig; account: { login: number; server: string; tradeMode: string; balance?: number } }): ModeStep {
+  if (input.cfg.demo1rInvalid) return { mode: "normal", event: "disarmed", reason: "demo_1r_invalid" };
+  if (input.cfg.demo1r) {
+    if (!demoAccount(input.account)) return { mode: "normal", event: "disarmed", reason: "demo_1r_forbidden" };
+    return { mode: "recovery", event: input.prev === "recovery" ? "stay" : "enter_recovery", reason: "demo_1r_explicit" };
+  }
+  return stepRecoveryMode({ balance: input.balance, prev: input.prev, cfg: input.cfg });
+}
+
+/**
+ * Per-side commission in USD after rounding half-up to the cent.
+ * `usdPerLotPerSide` is USD per 1.00 lot, one side, before rounding (verified native spec 3.5).
+ * 3.5 * 0.01 = 0.035, which rounds to 0.04. The nominal 0.07 round trip is not what the deals show.
+ */
+export function commissionPerSideUsd(volumeLots: number, usdPerLotPerSide: number): number | null {
+  if (!finite(volumeLots) || !finite(usdPerLotPerSide) || !(volumeLots > 0) || !(usdPerLotPerSide > 0)) return null;
+  const rateMilli = Math.round(usdPerLotPerSide * 1000);
+  const volMilli = Math.round(volumeLots * 1000);
+  if (Math.abs(rateMilli - usdPerLotPerSide * 1000) > 1e-4 || Math.abs(volMilli - volumeLots * 1000) > 1e-4) return null;
+  const numer = BigInt(rateMilli) * BigInt(volMilli);
+  const denom = 10000n;
+  const cents = (numer + denom / 2n) / denom;
+  return Number(cents) / 100;
+}
+
+/** Round trip = two independently rounded sides. At 0.01 lot and 3.5/side this is 0.08, not 0.07. */
+export function commissionRoundTurnUsd(volumeLots: number, usdPerLotPerSide: number): number | null {
+  const side = commissionPerSideUsd(volumeLots, usdPerLotPerSide);
+  if (side == null) return null;
+  return Math.round(side * 200) / 100;
+}
+
+export type CommissionRt =
+  | { ok: true; usd: number; source: "per_lot_side" | "explicit_rt" | "both" }
+  | { ok: false; reason: "commission_missing" | "commission_invalid" | "commission_mismatch" };
+
+/**
+ * `BEEBOTS_COMMISSION_USD_PER_LOT_SIDE`: USD per 1.00 lot, one side, before cent rounding.
+ * `BEEBOTS_COMMISSION_RT_USD`: USD round trip at 0.01 lot after that rounding. Not per 1.00 lot and not per side.
+ * Both set must agree. Neither set, zero, or a 0.07-vs-0.08 mismatch stays unverified.
+ */
+export function commissionRoundTurnFromEnv(env: Record<string, string | undefined>, volumeLots = LOT): CommissionRt {
+  const perSide = numEnv(env.BEEBOTS_COMMISSION_USD_PER_LOT_SIDE);
+  const explicit = numEnv(env.BEEBOTS_COMMISSION_RT_USD);
+  if (perSide == null && explicit == null) return { ok: false, reason: "commission_missing" };
+  if ((perSide != null && !(perSide > 0)) || (explicit != null && !(explicit > 0))) return { ok: false, reason: "commission_invalid" };
+  const computed = perSide != null ? commissionRoundTurnUsd(volumeLots, perSide) : null;
+  if (perSide != null && computed == null) return { ok: false, reason: "commission_invalid" };
+  if (computed != null && explicit != null && Math.abs(computed - explicit) > 0.001) return { ok: false, reason: "commission_mismatch" };
+  const usd = explicit ?? computed;
+  if (usd == null || !(usd > 0)) return { ok: false, reason: "commission_invalid" };
+  const source = computed != null && explicit != null ? "both" : explicit != null ? "explicit_rt" : "per_lot_side";
+  return { ok: true, usd, source };
 }
 
 export interface SymbolSpecs {
@@ -266,7 +345,10 @@ export interface PlanInput {
   openMagics: number[];
   correlated: boolean;
   entryBlocked: string | null;
+  /** FORCE_STOP file. Blocks the force loop. Blocks own-signals unless explicit demo 1R is on for this demo account. */
   forceStop: boolean;
+  /** Separate full halt. Blocks own-signals even when demo 1R is on. The file is never created here. */
+  emergencyStop?: boolean;
   forceLoop: boolean;
   relax: boolean;
   gateOk: boolean | null;
@@ -303,7 +385,8 @@ function evidenceKey(p: PlanInput): string {
     p.candidateId, p.bar, p.mode, p.signal ?? "", p.dist ?? "", p.atr ?? "", p.entry ?? "",
     p.quote?.tsMs ?? "", p.jev?.tsMs ?? "", p.jev?.choice ?? "", p.jev?.confidence ?? "",
     p.kronos?.tsMs ?? "", p.kronos?.expectedMovePx ?? "", p.latencyMs ?? "",
-    p.correlated ? 1 : 0, p.entryBlocked ?? "", p.forceStop ? 1 : 0, p.forceLoop ? 1 : 0, p.relax ? 1 : 0,
+    p.correlated ? 1 : 0, p.entryBlocked ?? "", p.forceStop ? 1 : 0, p.emergencyStop ? 1 : 0, p.forceLoop ? 1 : 0, p.relax ? 1 : 0,
+    p.cfg.demo1r ? 1 : 0,
     p.gateOk == null ? "" : p.gateOk ? 1 : 0, p.purposeOk == null ? "" : p.purposeOk ? 1 : 0,
     p.openMagics.join("."), p.account.balance, p.specs?.spreadPrice ?? "", p.specs?.stopsLevelPoints ?? "",
     p.specs?.slippagePrice ?? "", p.specs?.commissionRoundTurnUsd ?? "", p.specs?.contractSize ?? "",
@@ -318,14 +401,19 @@ function remember(p: PlanInput, reason: string, bucket: "evidence" | "done" | "n
 /** One candidate on one closed bar. Null signals stay null. Identical evidence is not retried. Orders are not repeated. */
 export function planEntry(p: PlanInput): PlanResult {
   const key = `${p.candidateId}:${p.bar}`;
-  if (p.forceStop) return remember(p, "force_stop", "evidence", evidenceKey(p), false);
+  if (p.emergencyStop) return remember(p, "emergency_stop", "evidence", evidenceKey(p), false);
   if (p.forceLoop) return remember(p, "force_loop_off", "evidence", evidenceKey(p), false);
   if (p.relax || p.purposeRelaxed) return remember(p, "relax_off", "evidence", evidenceKey(p), false);
-  const acctOk = p.account.login === DEMO_LOGIN && p.account.server === DEMO_SERVER && p.account.tradeMode === "demo";
+  if (p.cfg.demo1rInvalid) return remember(p, "demo_1r_invalid", "evidence", evidenceKey(p), false);
+  const acctOk = demoAccount(p.account);
+  if (p.cfg.demo1r && !acctOk) return remember(p, "demo_1r_forbidden", "evidence", evidenceKey(p), false);
   if (!acctOk) return remember(p, "account_guard", "evidence", evidenceKey(p), false);
-  const bee1 = p.bee === "bee1" && (p.cfg.disableBee1 || p.mode === "recovery");
+  const ownSignal1r = p.cfg.demo1r && acctOk;
+  if (p.forceStop && !ownSignal1r) return remember(p, "force_stop", "evidence", evidenceKey(p), false);
+  const mode: RecoveryMode = ownSignal1r ? "recovery" : p.mode;
+  const bee1 = p.bee === "bee1" && (p.cfg.disableBee1 || mode === "recovery");
   if (bee1) return remember(p, "bee1_disabled", "done", key, true);
-  if (!beesForMode(p.mode, p.cfg.disableBee1).includes(p.bee as BeeId) || beeOfMagic(p.magic) !== p.bee) return remember(p, "magic_mismatch", "done", key, true);
+  if (!beesForMode(mode, p.cfg.disableBee1).includes(p.bee as BeeId) || beeOfMagic(p.magic) !== p.bee) return remember(p, "magic_mismatch", "done", key, true);
   if (p.dedup.orders.includes(key)) return skip("dedup_order", p.dedup, true);
   if (p.dedup.noSignal.includes(key)) return skip("dedup_no_signal", p.dedup, true);
   if (p.dedup.done.includes(key)) return skip("dedup_done", p.dedup, true);
@@ -338,8 +426,8 @@ export function planEntry(p: PlanInput): PlanResult {
   if (p.gateOk == null) return remember(p, "no_gate", "evidence", ev, false);
   if (!p.gateOk) return remember(p, "gate", "evidence", ev, false);
   if (p.purposeOk === false) return remember(p, "purpose", "evidence", ev, false);
-  const rr = rrFor(p.mode);
-  if (p.mode === "recovery") {
+  const rr = rrFor(mode);
+  if (mode === "recovery") {
     const noise = recoveryNoise({ nowMs: p.nowMs, side: p.signal, atr: p.atr, quote: p.quote, jev: p.jev, kronos: p.kronos, latencyMs: p.latencyMs, cfg: p.cfg });
     if (!noise.ok) return remember(p, `noise:${noise.reason}`, "evidence", ev, false);
     const feas = assessFeasibility({ balance: p.account.balance, atr: p.atr, specs: p.specs, rr });
@@ -357,14 +445,15 @@ export function planEntry(p: PlanInput): PlanResult {
     { symbol: "XAUUSD", side: p.signal, volume: LOT, price: p.entry, sl: px.sl, tp: px.tp },
     orderAcct, p.openCount, contract, p.nowMs, p.lastTickMs ?? p.quote?.tsMs,
   );
-  if (!checked.ok) return remember(p, `check_order:${checked.reason}`, "evidence", ev, false);
+  const rejected = orderRejectReason(checked);
+  if (rejected != null) return remember(p, `check_order:${rejected}`, "evidence", ev, false);
   const dedup = { ...p.dedup, orders: addKey(p.dedup.orders, key) };
   return { action: "order", reason: "order", terminal: true, modifiesOpenPositions: false, rr, sl: px.sl, tp: px.tp, slDist: px.slDist, tpDist: px.tpDist, gross: true, feeAdjusted: false, dedup };
 }
 
-export function scanDue(input: { armed: boolean; mode: RecoveryMode; nowMs: number; barTsMs: number; lastBarTsMs: number; lastScanMs: number; evalIntervalMs: number }): { due: boolean; kind: "new_bar" | "recovery_rescan" | "idle" } {
+export function scanDue(input: { armed: boolean; demo1r?: boolean; mode: RecoveryMode; nowMs: number; barTsMs: number; lastBarTsMs: number; lastScanMs: number; evalIntervalMs: number }): { due: boolean; kind: "new_bar" | "recovery_rescan" | "idle" } {
   if (input.barTsMs > input.lastBarTsMs) return { due: true, kind: "new_bar" };
-  if (input.armed && input.mode === "recovery" && input.nowMs - input.lastScanMs >= input.evalIntervalMs) return { due: true, kind: "recovery_rescan" };
+  if ((input.armed || input.demo1r) && input.mode === "recovery" && input.nowMs - input.lastScanMs >= input.evalIntervalMs) return { due: true, kind: "recovery_rescan" };
   return { due: false, kind: "idle" };
 }
 
@@ -447,16 +536,35 @@ export function planBeeStop(input: {
   balance: number;
   noiseOk: boolean | null;
   forceStop: boolean;
+  emergencyStop?: boolean;
+  account?: { login: number; server: string; tradeMode: string; balance?: number };
   relax: boolean;
   openPositions: readonly { sl?: number; tp?: number; slPx?: number; tpPx?: number }[];
 }): { slPx: number; tpPx: number; slDist: number; atr: number; budgetClamped: boolean; rr: 1 | 2; modifiesOpenPositions: false } | null {
   openProtectionsUntouched(input.openPositions);
-  if (input.forceStop || input.relax) return null;
-  if (input.bee === "bee1" && (input.cfg.disableBee1 || input.mode === "recovery")) return null;
-  if (input.mode === "recovery" && input.noiseOk !== true) return null;
-  const p = protectionFor(input.side, input.entry, input.m5, input.balance, 2, rrFor(input.mode));
+  if (input.emergencyStop || input.relax || input.cfg.demo1rInvalid) return null;
+  const ownSignal1r = input.cfg.demo1r && !!input.account && demoAccount(input.account);
+  if (input.cfg.demo1r && !ownSignal1r) return null;
+  if (input.forceStop && !ownSignal1r) return null;
+  const mode: RecoveryMode = ownSignal1r ? "recovery" : input.mode;
+  if (input.bee === "bee1" && (input.cfg.disableBee1 || mode === "recovery")) return null;
+  if (mode === "recovery" && input.noiseOk !== true) return null;
+  const p = protectionFor(input.side, input.entry, input.m5, input.balance, 2, rrFor(mode));
   if (!p) return null;
-  return { ...p, rr: rrFor(input.mode), modifiesOpenPositions: false };
+  return { ...p, rr: rrFor(mode), modifiesOpenPositions: false };
+}
+
+/** Demo 1R always uses the broker balance. A virtual override on that path is refused. */
+export function balanceForEntry(acct: { login: number; server: string; tradeMode: string; balance: number }, override: number | string | null | undefined, cfg: RecoveryEnvConfig): BalanceResult {
+  if (cfg.demo1rInvalid) return { ok: false, reason: "demo_1r_invalid" };
+  if (cfg.demo1r) {
+    const blank = override == null || (typeof override === "string" && override.trim() === "");
+    if (!blank) return { ok: false, reason: "demo_1r_uses_broker_balance" };
+    if (!demoAccount(acct)) return { ok: false, reason: "demo_1r_forbidden" };
+    if (!(acct.balance > 0)) return { ok: false, reason: "balance_invalid" };
+    return { ok: true, balance: acct.balance, source: "broker", account: { login: acct.login, server: acct.server, tradeMode: "demo", balance: acct.balance } };
+  }
+  return resolveDecisionBalance(acct, override);
 }
 
 export interface QuoteFields {
@@ -464,12 +572,16 @@ export interface QuoteFields {
   point?: number; volume_min?: number; volume_step?: number; volume_max?: number; digits?: number;
 }
 
-/** Broker fields plus explicit commission and slippage. Missing pieces stay unverified (recovery does not guess). */
+/**
+ * Broker geometry from the quote. Commission comes only from the explicit mapping.
+ * Slippage must be a positive configured assumption; 0 is not accepted as a measured bound.
+ * Missing either piece stays unverified.
+ */
 export function specsFromQuote(q: QuoteFields | null, env: Record<string, string | undefined>): SymbolSpecs | null {
   if (!q) return null;
-  const commission = numEnv(env.BEEBOTS_COMMISSION_RT_USD);
+  const commission = commissionRoundTurnFromEnv(env, LOT);
   const slippage = numEnv(env.BEEBOTS_SLIPPAGE_PRICE);
-  if (commission == null || slippage == null || commission < 0 || slippage < 0) return null;
+  if (!commission.ok || slippage == null || !(slippage > 0)) return null;
   if (!(q.contract_size! > 0) || !(q.point! > 0)) return null;
   if (!(q.volume_min! > 0) || !(q.volume_step! > 0) || !(q.volume_max! > 0)) return null;
   if (!finite(q.stops_level) || !finite(q.freeze_level) || q.stops_level < 0 || q.freeze_level < 0) return null;
@@ -477,7 +589,7 @@ export function specsFromQuote(q: QuoteFields | null, env: Record<string, string
   return {
     contractSize: q.contract_size!, volumeMin: q.volume_min!, volumeStep: q.volume_step!, volumeMax: q.volume_max!,
     stopsLevelPoints: q.stops_level, freezeLevelPoints: q.freeze_level, point: q.point!, digits: q.digits ?? 2,
-    spreadPrice: q.ask - q.bid, slippagePrice: slippage, commissionRoundTurnUsd: commission,
+    spreadPrice: q.ask - q.bid, slippagePrice: slippage, commissionRoundTurnUsd: commission.usd,
   };
 }
 
