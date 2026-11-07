@@ -25,6 +25,8 @@ describe("historical harness", () => {
     expect(out.holdout_bars_ignored).toBeGreaterThan(50000);
     expect(out.current_parents_pristine_holdout).toBe(false);
     expect(out.parent_baseline).toBe("tainted");
+    expect(out.demo_parity).toBe(false);
+    expect(out.fitness_for_evolution).toBe(false);
   });
   it("writes a plan that does not start evolution", () => {
     const line = py(["evolve/lib/research_batch.py", "plan"]);
