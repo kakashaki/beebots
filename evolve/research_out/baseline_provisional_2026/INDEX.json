@@ -342,5 +342,11 @@
     "note": "The withheld window applies to new research that has not seen those bars. It is not an unseen holdout for these parents."
   },
   "drawdown_definition": "published max_dd_usd is close-to-close mark-to-market equity peak to trough. Cash drawdown is in LEDGER_AUDIT.json. A value above the initial 100 is a giveback from a higher peak.",
-  "ledger_audit": "LEDGER_AUDIT.json"
+  "ledger_audit": "LEDGER_AUDIT.json",
+  "execution": "price_only_exploratory",
+  "demo_parity": false,
+  "full_gate": false,
+  "promotable": false,
+  "demo_config_book": "portfolio_bee2_bee3_scalp_enhancedRR1",
+  "demo_config_note": "bee2+bee3 with the enhanced scalp and bee1 off is the requested demo config. That book is still price-only. The other books are research extras."
 }

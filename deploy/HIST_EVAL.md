@@ -1,6 +1,8 @@
 # 2021-2026 evaluation and bounded OpenEvolve plan
 
-The requested span is 2021-01-01 through the 2026-11-07 session. This bundle does not contain 2021-2025. A run on it is a **tainted 2026 baseline** for the current parents, not a 2021-2026 result and not an unseen holdout.
+The requested span is 2021-01-01 through the 2026-11-07 session. This bundle does not contain 2021-2025. A run on it is a **tainted 2026 price-only baseline** for the current parents, not a 2021-2026 result, not an unseen holdout, and not a replay of the running demo.
+
+The running demo decides in `planEntry` (`beebots_mt5/src/mt5/recovery.ts`): bee2 and bee3, enhanced scalp on, bee1 off, gross 1R, force loop off. The 19:50 ICT read-only snapshot shows balance 2082.57, flat, no orders since demo 1R, and a Friday close quote at 2026-11-06 21:56:59Z. Leverage and margin are unknown. `beebots_mt5/src/mt5/parity.ts` sends a complete recorded decision through `planEntry` and emits no fill. A missing quote, latency, Kronos std/agree, Jev verdict, or tick age stays unavailable. A logged `jevAgeMs` near 1.794e12 is `nowMs - 0`: `index-recovery.patch` sets `tsMs` to `answeredAt ?? 0`. The 27 decisions since the last start are `candidate_none`, `session_closed`, and `no_setup`, which return before the Jev filter, so that zero is not a stale verdict and is not replaced. The attached gate log and the M5 price file are not a full gate. Dukascopy is a different provider and is not IC execution. Regenerating Kronos or Jev is not scheduled. The only intentional research difference, once a real decision row exists, is the 100 USD balance. OpenEvolve must not treat `hist_eval.py` as that demo.
 
 The current parents were created 2026-11-04 ICT and selected from backtests run 2026-10-30 through 2026-11-04. Those backtests used a 40-day train and a 10-day OOS that ends 2026-11-04. That OOS sits inside 2026. No pristine temporal holdout for these parents is in this bundle.
 

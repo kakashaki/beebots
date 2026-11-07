@@ -1,0 +1,276 @@
+{
+  "kind": "runtime_parity_scope",
+  "full_system_2021_now": false,
+  "full_period_2021_2026": false,
+  "historical_performance_claim": false,
+  "demo_parity_of_price_only_2026": false,
+  "evolution_against_price_only": false,
+  "paid_call": false,
+  "live_or_demo_mutation": false,
+  "fills_emitted": 0,
+  "manifest": {
+    "confirmed_from": "source_constants_plus_attached_2026-11-07T12:50Z_snapshot",
+    "runtime_process_snapshot": "attached_read_only_not_reread_here",
+    "bees": [
+      "bee2",
+      "bee3"
+    ],
+    "bee1": "off",
+    "scalp": "on",
+    "rr": 1,
+    "force_loop": false,
+    "balance_band_armed": false,
+    "demo1r": true,
+    "demo_enhanced_1r": true,
+    "disable_bee1": true,
+    "commission_usd_per_lot_side": 3.5,
+    "slippage_price": 0.3,
+    "slippage_status": "assumption_not_observed",
+    "intentional_difference": [
+      "decision_balance_usd"
+    ],
+    "intentional_difference_note": "Research uses 100 USD. The observed demo balance is 2082.57 with no override set. The 25% ceiling uses whichever balance is passed in. A $100 ceiling rejects more stops. That is the same rule, and it is the only intentional difference."
+  },
+  "source_review": {
+    "legend": {
+      "configured": "source constant or env default in this tree",
+      "observed": "attached 19:50 ICT snapshot, not re-read from the process",
+      "unknown": "not in the snapshot and not in this tree"
+    },
+    "account": {
+      "login_server": {
+        "class": "configured",
+        "value": "53109826 @ ICMarketsSC-Demo",
+        "source": "beebots_mt5/src/mt5/risk.ts",
+        "agrees_with_observed": true
+      },
+      "balance_usd": {
+        "class": "observed",
+        "value": 2082.57,
+        "positions": 0,
+        "flat": true
+      },
+      "balance_override": {
+        "class": "configured",
+        "value": "unset, and demo 1R refuses an override",
+        "source": "balanceForEntry"
+      },
+      "leverage_margin": {
+        "class": "unknown",
+        "note": "bridge account op returns login, server, tradeMode, and balance only"
+      }
+    },
+    "quote": {
+      "class": "observed",
+      "bid": 4071.41,
+      "ask": 4071.81,
+      "time_utc": "2026-11-06T21:56:59Z",
+      "note": "Friday close, weekend at the snapshot"
+    },
+    "orders_since_demo_1r": {
+      "class": "observed",
+      "value": 0
+    },
+    "decisions_since_last_start": {
+      "class": "observed",
+      "bee2_candidate_none": 9,
+      "bee3_candidate_none": 9,
+      "scalp_session_closed": 7,
+      "scalp_no_setup": 2
+    },
+    "bees": {
+      "active": {
+        "class": "configured",
+        "value": [
+          "bee2",
+          "bee3"
+        ],
+        "source": "recovery.ts ACTIVE_BEES"
+      },
+      "bee1": {
+        "class": "configured",
+        "value": "off",
+        "source": "disableBee1 default and demo 1R recovery path; observed status paused_owner_bee23_only"
+      },
+      "scalp": {
+        "class": "configured",
+        "magic": 530250,
+        "bee": "bee2",
+        "enabled_by": "BEEBOTS_DEMO_1R=1 and BEEBOTS_DEMO_ENHANCED_1R=1"
+      },
+      "programs": {
+        "class": "observed",
+        "bee2_magic": 530208,
+        "bee3_magic": 530312,
+        "bee1_magic": 530105
+      }
+    },
+    "costs": {
+      "class": "configured",
+      "commission_per_lot_side": 3.5,
+      "round_trip_at_0_01": 0.08,
+      "slippage_price": 0.3,
+      "slippage_status": "assumption_not_observed"
+    },
+    "forecast_age": {
+      "class": "configured",
+      "ms": 90000,
+      "source": "beebots_mt5/src/mt5/latency.ts STALE_VERDICT_MS, used by recovery.ts"
+    },
+    "evolve_trading": {
+      "class": "configured",
+      "value": "unset means on",
+      "source": "beebots_mt5/index-recovery.patch EVOLVE_TRADING !== \"0\""
+    },
+    "models": {
+      "class": "observed",
+      "kronos": "NeoQuasar/Kronos-small + Kronos-Tokenizer-base :8765",
+      "openjev": "1.1.0 :3001",
+      "chooser": "gpt-6.1-sol"
+    },
+    "jev_age": {
+      "class": "source",
+      "logged_example": "jevAgeMs about 1.794e12 at 2026-11-06 22:07Z",
+      "cause": "recoverySnap writes tsMs: answeredAt ?? 0. entryDiagnostic then logs nowMs - tsMs. A missing answeredAt becomes age equal to the clock, about 1.794e12.",
+      "not_shown": "OpenJev.gateState is not in this checkout, so a service payload of epoch 0 is not established. The fallback object in the same patch has no answeredAt, which is enough to produce 0.",
+      "decision_effect_on_the_27_rows": "Those reasons are candidate_none, session_closed, and no_setup. planEntry returns them before recoveryNoise, so the zero timestamp did not decide them."
+    },
+    "full_broker_simulation": false,
+    "price_bars_are_a_full_gate": false
+  },
+  "observed_demo": {
+    "balance_usd": 2082.57,
+    "flat": true,
+    "orders_since_demo_1r": 0,
+    "latest_quote_utc": "2026-11-06T21:56:59Z"
+  },
+  "exact_replay": "planEntry in beebots_mt5/src/mt5/recovery.ts. No second stop, rounding, or filter implementation.",
+  "exact_replay_when": "A row is a recorded decision and every required field is present, including an explicit null where the process observed none.",
+  "unavailable_when": "The field was never observed. Price bars and the attached gate log are in this class. Filters are not skipped and fills are not invented.",
+  "attached_gate_log": {
+    "exact_replay": false,
+    "status": "unavailable",
+    "missing": [
+      "bar_open",
+      "quote_age_ms",
+      "move_std_px",
+      "agree_share",
+      "kronos_certain",
+      "tick_age",
+      "margin"
+    ]
+  },
+  "dukascopy": "Separate provider. It cannot be IC execution and it does not reconstruct IC spread, latency, Kronos, or Jev.",
+  "regenerated_forecasts": "Not scheduled. A later causal run with a frozen model and only past inputs would be a regenerated simulation, not recorded execution.",
+  "smallest_path": [
+    "A complete recorded decision replays planEntry and still emits no fill.",
+    "The parent can attach the running demo's decision rows (quote, tick age, latency, Kronos std and agree, Jev, specs, open positions, stop flags). Those rows replay here.",
+    "Broker deal records, if attached later, are the execution. They are not rebuilt from M5 highs and lows."
+  ],
+  "books": [
+    {
+      "label": "isolated_bee1_normalRR2",
+      "role": "research_extra_price_only",
+      "execution": "price_only_exploratory",
+      "demo_parity": false,
+      "full_gate": false,
+      "promotable": false
+    },
+    {
+      "label": "isolated_bee1_basicRR1",
+      "role": "research_extra_price_only",
+      "execution": "price_only_exploratory",
+      "demo_parity": false,
+      "full_gate": false,
+      "promotable": false
+    },
+    {
+      "label": "isolated_bee2_normalRR2",
+      "role": "research_extra_price_only",
+      "execution": "price_only_exploratory",
+      "demo_parity": false,
+      "full_gate": false,
+      "promotable": false
+    },
+    {
+      "label": "isolated_bee2_basicRR1",
+      "role": "research_extra_price_only",
+      "execution": "price_only_exploratory",
+      "demo_parity": false,
+      "full_gate": false,
+      "promotable": false
+    },
+    {
+      "label": "isolated_bee3_normalRR2",
+      "role": "research_extra_price_only",
+      "execution": "price_only_exploratory",
+      "demo_parity": false,
+      "full_gate": false,
+      "promotable": false
+    },
+    {
+      "label": "isolated_bee3_basicRR1",
+      "role": "research_extra_price_only",
+      "execution": "price_only_exploratory",
+      "demo_parity": false,
+      "full_gate": false,
+      "promotable": false
+    },
+    {
+      "label": "isolated_demo_scalp_enhancedRR1",
+      "role": "research_extra_price_only",
+      "execution": "price_only_exploratory",
+      "demo_parity": false,
+      "full_gate": false,
+      "promotable": false
+    },
+    {
+      "label": "portfolio_bee2_bee3_normalRR2",
+      "role": "research_extra_price_only",
+      "execution": "price_only_exploratory",
+      "demo_parity": false,
+      "full_gate": false,
+      "promotable": false
+    },
+    {
+      "label": "portfolio_bee2_bee3_basicRR1",
+      "role": "research_extra_price_only",
+      "execution": "price_only_exploratory",
+      "demo_parity": false,
+      "full_gate": false,
+      "promotable": false
+    },
+    {
+      "label": "portfolio_bee2_bee3_scalp_enhancedRR1",
+      "role": "demo_config_price_only",
+      "execution": "price_only_exploratory",
+      "demo_parity": false,
+      "full_gate": false,
+      "promotable": false
+    },
+    {
+      "label": "portfolio_bee1_bee2_bee3_normalRR2",
+      "role": "research_extra_price_only",
+      "execution": "price_only_exploratory",
+      "demo_parity": false,
+      "full_gate": false,
+      "promotable": false
+    },
+    {
+      "label": "portfolio_bee1_bee2_bee3_basicRR1",
+      "role": "research_extra_price_only",
+      "execution": "price_only_exploratory",
+      "demo_parity": false,
+      "full_gate": false,
+      "promotable": false
+    },
+    {
+      "label": "portfolio_all_enhancedRR1",
+      "role": "research_extra_price_only",
+      "execution": "price_only_exploratory",
+      "demo_parity": false,
+      "full_gate": false,
+      "promotable": false
+    }
+  ]
+}

@@ -111,6 +111,7 @@ def preflight(evolve_root, data_full_period, bridges, dollar_cap=None, price_per
     add("budget_hook", True, "evolve/lib/research_budget.py enforces the count and token cap without binding the shared bridges")
     add("no_new_signup", True, "use the existing local bridges; do not open a provider account")
     add("shared_bridges_unchanged", True, "preflight does not set maxCalls and does not rewrite :4182, :4183, or :4184")
+    add("runtime_parity_evaluator", False, "hist_eval is price-only and does not call planEntry. Evolution against it is refused until recorded decisions replay.")
     return {
         "ok": all(c["ok"] for c in checks),
         "evolution_running": False,

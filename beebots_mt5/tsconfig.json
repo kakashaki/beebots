@@ -10,6 +10,8 @@
     "src/mt5/evolve-path.ts",
     "src/mt5/demo-scalp.ts",
     "src/mt5/demo-scalp.test.ts",
+    "src/mt5/parity.ts",
+    "src/mt5/parity.test.ts",
     "src/mt5/protect.ts",
     "src/mt5/risk.ts",
     "src/mt5/hours.ts",

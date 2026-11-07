@@ -2,7 +2,15 @@
   "status": "not_started",
   "evolution_running": false,
   "paid_call": false,
-  "reason": "train_and_validation_years_absent_and_budget_not_confirmed",
+  "reason": "price_only_evaluator_is_not_the_demo_and_train_years_are_absent",
+  "evaluator": {
+    "module": "evolve/lib/hist_eval.py",
+    "execution": "price_only_exploratory",
+    "demo_parity": false,
+    "full_gate": false,
+    "fitness_for_evolution": false,
+    "exact_replay": "beebots_mt5/src/mt5/parity.ts calls planEntry and emits no fill"
+  },
   "parents": {
     "bee2": {
       "file": "evolve/fixtures/live/bee2-1acecae64173.py",
@@ -47,6 +55,7 @@
     "stop_on_first_evaluator_error": true,
     "stop_if_coverage_not_full_period": true,
     "stop_if_bridge_health_not_200": true,
+    "stop_if_evaluator_not_demo_parity": true,
     "new_provider_signup": false,
     "population_dir": "evolve/research_out/oe_db_snapshot (copy; state/oe_db is not deleted)",
     "candidate_dir": "evolve/research_out/candidates/<bee>",

@@ -1,6 +1,8 @@
 """Frozen-baseline price/setup evaluation and 2021-2026 coverage.
 
-Not a full-system replay: the gate log has no Kronos certainty fields and no bar id.
+Price and setup exploration only. This is not the running demo: it does not call
+planEntry and it does not apply quote age, latency, Kronos std/agree, Jev, emergency,
+or margin. Do not call the result a demo match, a full gate, or a promotion.
 2021-2025 are absent. The 2026 file is a tainted historical baseline for the current
 parents (selected through 2026-11-04). It is not an unseen holdout and not an OpenEvolve score.
 2025-07-01 onward is withheld from new research only.
@@ -784,6 +786,7 @@ def run_provisional(primary_path, live_path, out_dir, initial, bee_paths, slip_v
                 "parent_provenance": PARENT_PROVENANCE,
                 "evolution_eligible": False, "full_period": False, "historical_performance": False,
                 "provisional_2026": True, "gate_replay": False,
+                "execution": "price_only_exploratory", "demo_parity": False, "full_gate": False, "promotable": False,
                 "summary": book["summary"], "by_strategy": book["by_strategy"],
                 "reject_counts": _count(book["rejects"]),
             }
@@ -800,6 +803,12 @@ def run_provisional(primary_path, live_path, out_dir, initial, bee_paths, slip_v
         "full_period_2021_2026": False,
         "historical_performance_claim": False,
         "evolution_eligible": False,
+        "execution": "price_only_exploratory",
+        "demo_parity": False,
+        "full_gate": False,
+        "promotable": False,
+        "demo_config_book": "portfolio_bee2_bee3_scalp_enhancedRR1",
+        "demo_config_note": "bee2+bee3 with the enhanced scalp and bee1 off is the requested demo config. That book is still price-only. The other books are research extras.",
         "provider": PROVIDER_2026,
         "pre_2026_provider": "absent_other_worker",
         "holdout_rule": "2025-07-01 UTC onward is withheld from new research only. This 2026 sample is a tainted baseline for parents selected through 2026-11-04. It is not an unseen holdout.",

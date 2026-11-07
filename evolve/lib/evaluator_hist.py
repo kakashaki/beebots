@@ -22,6 +22,10 @@ def _provenance(extra):
         "new_research_withheld_from": "2025-07-01",
         "current_parents_pristine_holdout": False,
         "parent_baseline": "tainted",
+        "demo_parity": False,
+        "full_gate": False,
+        "fitness_for_evolution": False,
+        "execution": "price_only_exploratory",
         **extra,
     }
 
