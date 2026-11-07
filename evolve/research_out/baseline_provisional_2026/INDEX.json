@@ -1,0 +1,333 @@
+{
+  "kind": "provisional_2026_baseline",
+  "full_period_2021_2026": false,
+  "historical_performance_claim": false,
+  "evolution_eligible": false,
+  "provider": "icdemo_m5_hc_utc_converted_2026",
+  "pre_2026_provider": "absent_other_worker",
+  "holdout_rule": "2025-07-01 UTC onward is holdout. This 2026 sample sits inside it and is a frozen baseline only.",
+  "gate_replay": "not_run_fields_insufficient",
+  "initial_usd": 100.0,
+  "results": [
+    {
+      "slip": 0.0,
+      "label": "isolated_bee1_normalRR2",
+      "net": -77.35,
+      "trades": 75,
+      "final": 22.65,
+      "max_dd_usd": 374.35
+    },
+    {
+      "slip": 0.0,
+      "label": "isolated_bee1_basicRR1",
+      "net": -76.51,
+      "trades": 176,
+      "final": 23.49,
+      "max_dd_usd": 217.01
+    },
+    {
+      "slip": 0.0,
+      "label": "isolated_bee2_normalRR2",
+      "net": -83.37,
+      "trades": 117,
+      "final": 16.63,
+      "max_dd_usd": 276.03
+    },
+    {
+      "slip": 0.0,
+      "label": "isolated_bee2_basicRR1",
+      "net": -83.64,
+      "trades": 159,
+      "final": 16.36,
+      "max_dd_usd": 133.7
+    },
+    {
+      "slip": 0.0,
+      "label": "isolated_bee3_normalRR2",
+      "net": -81.26,
+      "trades": 24,
+      "final": 18.74,
+      "max_dd_usd": 81.26
+    },
+    {
+      "slip": 0.0,
+      "label": "isolated_bee3_basicRR1",
+      "net": -81.71,
+      "trades": 52,
+      "final": 18.29,
+      "max_dd_usd": 95.37
+    },
+    {
+      "slip": 0.0,
+      "label": "isolated_demo_scalp_enhancedRR1",
+      "net": -86.94,
+      "trades": 46,
+      "final": 13.06,
+      "max_dd_usd": 98.94
+    },
+    {
+      "slip": 0.0,
+      "label": "portfolio_bee2_bee3_normalRR2",
+      "net": 775.7,
+      "trades": 1496,
+      "final": 875.7,
+      "max_dd_usd": 1205.25
+    },
+    {
+      "slip": 0.0,
+      "label": "portfolio_bee2_bee3_basicRR1",
+      "net": 793.59,
+      "trades": 1675,
+      "final": 893.59,
+      "max_dd_usd": 623.28
+    },
+    {
+      "slip": 0.0,
+      "label": "portfolio_bee2_bee3_scalp_enhancedRR1",
+      "net": -86.92,
+      "trades": 20,
+      "final": 13.08,
+      "max_dd_usd": 98.92
+    },
+    {
+      "slip": 0.0,
+      "label": "portfolio_bee1_bee2_bee3_normalRR2",
+      "net": 743.74,
+      "trades": 1900,
+      "final": 843.74,
+      "max_dd_usd": 1595.3
+    },
+    {
+      "slip": 0.0,
+      "label": "portfolio_bee1_bee2_bee3_basicRR1",
+      "net": 714.19,
+      "trades": 1693,
+      "final": 814.19,
+      "max_dd_usd": 672.55
+    },
+    {
+      "slip": 0.0,
+      "label": "portfolio_all_enhancedRR1",
+      "net": -86.92,
+      "trades": 20,
+      "final": 13.08,
+      "max_dd_usd": 98.92
+    },
+    {
+      "slip": 0.3,
+      "label": "isolated_bee1_normalRR2",
+      "net": -76.68,
+      "trades": 64,
+      "final": 23.32,
+      "max_dd_usd": 260.75
+    },
+    {
+      "slip": 0.3,
+      "label": "isolated_bee1_basicRR1",
+      "net": -77.57,
+      "trades": 139,
+      "final": 22.43,
+      "max_dd_usd": 183.98
+    },
+    {
+      "slip": 0.3,
+      "label": "isolated_bee2_normalRR2",
+      "net": -84.03,
+      "trades": 111,
+      "final": 15.97,
+      "max_dd_usd": 254.74
+    },
+    {
+      "slip": 0.3,
+      "label": "isolated_bee2_basicRR1",
+      "net": -83.44,
+      "trades": 53,
+      "final": 16.56,
+      "max_dd_usd": 112.31
+    },
+    {
+      "slip": 0.3,
+      "label": "isolated_bee3_normalRR2",
+      "net": -84.48,
+      "trades": 13,
+      "final": 15.52,
+      "max_dd_usd": 84.48
+    },
+    {
+      "slip": 0.3,
+      "label": "isolated_bee3_basicRR1",
+      "net": -82.54,
+      "trades": 36,
+      "final": 17.46,
+      "max_dd_usd": 89.45
+    },
+    {
+      "slip": 0.3,
+      "label": "isolated_demo_scalp_enhancedRR1",
+      "net": -88.49,
+      "trades": 16,
+      "final": 11.51,
+      "max_dd_usd": 100.19
+    },
+    {
+      "slip": 0.3,
+      "label": "portfolio_bee2_bee3_normalRR2",
+      "net": -85.21,
+      "trades": 13,
+      "final": 14.79,
+      "max_dd_usd": 85.21
+    },
+    {
+      "slip": 0.3,
+      "label": "portfolio_bee2_bee3_basicRR1",
+      "net": -84.77,
+      "trades": 44,
+      "final": 15.23,
+      "max_dd_usd": 113.05
+    },
+    {
+      "slip": 0.3,
+      "label": "portfolio_bee2_bee3_scalp_enhancedRR1",
+      "net": -88.78,
+      "trades": 23,
+      "final": 11.22,
+      "max_dd_usd": 100.48
+    },
+    {
+      "slip": 0.3,
+      "label": "portfolio_bee1_bee2_bee3_normalRR2",
+      "net": -82.38,
+      "trades": 12,
+      "final": 17.62,
+      "max_dd_usd": 82.38
+    },
+    {
+      "slip": 0.3,
+      "label": "portfolio_bee1_bee2_bee3_basicRR1",
+      "net": -84.83,
+      "trades": 41,
+      "final": 15.17,
+      "max_dd_usd": 91.74
+    },
+    {
+      "slip": 0.3,
+      "label": "portfolio_all_enhancedRR1",
+      "net": -88.78,
+      "trades": 23,
+      "final": 11.22,
+      "max_dd_usd": 100.48
+    },
+    {
+      "slip": 0.6,
+      "label": "isolated_bee1_normalRR2",
+      "net": -75.22,
+      "trades": 66,
+      "final": 24.78,
+      "max_dd_usd": 226.85
+    },
+    {
+      "slip": 0.6,
+      "label": "isolated_bee1_basicRR1",
+      "net": -79.75,
+      "trades": 62,
+      "final": 20.25,
+      "max_dd_usd": 142.42
+    },
+    {
+      "slip": 0.6,
+      "label": "isolated_bee2_normalRR2",
+      "net": -84.66,
+      "trades": 91,
+      "final": 15.34,
+      "max_dd_usd": 219.94
+    },
+    {
+      "slip": 0.6,
+      "label": "isolated_bee2_basicRR1",
+      "net": -85.39,
+      "trades": 21,
+      "final": 14.61,
+      "max_dd_usd": 112.16
+    },
+    {
+      "slip": 0.6,
+      "label": "isolated_bee3_normalRR2",
+      "net": -82.93,
+      "trades": 9,
+      "final": 17.07,
+      "max_dd_usd": 82.93
+    },
+    {
+      "slip": 0.6,
+      "label": "isolated_bee3_basicRR1",
+      "net": -80.81,
+      "trades": 29,
+      "final": 19.19,
+      "max_dd_usd": 80.95
+    },
+    {
+      "slip": 0.6,
+      "label": "isolated_demo_scalp_enhancedRR1",
+      "net": -88.43,
+      "trades": 17,
+      "final": 11.57,
+      "max_dd_usd": 99.83
+    },
+    {
+      "slip": 0.6,
+      "label": "portfolio_bee2_bee3_normalRR2",
+      "net": -83.31,
+      "trades": 9,
+      "final": 16.69,
+      "max_dd_usd": 83.31
+    },
+    {
+      "slip": 0.6,
+      "label": "portfolio_bee2_bee3_basicRR1",
+      "net": -81.73,
+      "trades": 35,
+      "final": 18.27,
+      "max_dd_usd": 81.87
+    },
+    {
+      "slip": 0.6,
+      "label": "portfolio_bee2_bee3_scalp_enhancedRR1",
+      "net": -88.22,
+      "trades": 22,
+      "final": 11.78,
+      "max_dd_usd": 99.62
+    },
+    {
+      "slip": 0.6,
+      "label": "portfolio_bee1_bee2_bee3_normalRR2",
+      "net": -83.31,
+      "trades": 9,
+      "final": 16.69,
+      "max_dd_usd": 83.31
+    },
+    {
+      "slip": 0.6,
+      "label": "portfolio_bee1_bee2_bee3_basicRR1",
+      "net": -85.14,
+      "trades": 32,
+      "final": 14.86,
+      "max_dd_usd": 85.28
+    },
+    {
+      "slip": 0.6,
+      "label": "portfolio_all_enhancedRR1",
+      "net": -88.22,
+      "trades": 22,
+      "final": 11.78,
+      "max_dd_usd": 99.62
+    }
+  ],
+  "limitations": [
+    "2021-2025 bars are missing. This is not a 2021-now result.",
+    "Price and setup only. Kronos certainty and quote age are not in the gate log.",
+    "Slippage 0, 0.30, and 0.60 are assumptions. 0.30 is the configured demo assumption, not a measured bound.",
+    "Live-feed tail has no spread and cannot open.",
+    "100 USD keeps the 25% stop ceiling. Rejections are reported, not relaxed.",
+    "Bee1 is backtest-only and stays off on the running demo."
+  ]
+}

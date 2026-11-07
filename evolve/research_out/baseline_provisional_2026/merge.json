@@ -1,0 +1,13 @@
+{
+  "primary_rows": 59439,
+  "live_rows": 2284,
+  "overlap_rows": 1989,
+  "ohlc_mismatches": 0,
+  "max_overlap_abs_diff": 0.0,
+  "live_only_inside_primary_span": 0,
+  "live_only_after_primary": 295,
+  "merged_rows": 59734,
+  "duplicate_timestamps": 0,
+  "extension_spread": "missing_not_invented",
+  "rule": "primary wins on equal timestamps; live feed appends only later bars; those bars have no spread and cannot open"
+}

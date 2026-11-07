@@ -1,0 +1,87 @@
+{
+  "label": "isolated_bee3_basicRR1",
+  "mode": "basicRR1",
+  "strategies": [
+    "bee3"
+  ],
+  "slippage_price_per_side": 0.6,
+  "slippage_status": "assumption_not_observed",
+  "initial_usd": 100.0,
+  "capital_mode": "isolated",
+  "provider": "icdemo_m5_hc_utc_converted_2026",
+  "segment": "2026_sample_inside_predeclared_holdout",
+  "evolution_eligible": false,
+  "full_period": false,
+  "historical_performance": false,
+  "provisional_2026": true,
+  "gate_replay": false,
+  "summary": {
+    "initial_usd": 100.0,
+    "final_balance_usd": 19.19,
+    "net_pnl_usd": -80.81,
+    "return_pct": -80.81,
+    "max_dd_usd": 80.95,
+    "max_dd_pct": 80.95,
+    "trades": 29,
+    "wins": 11,
+    "win_rate": 0.3793,
+    "profit_factor": 0.4967,
+    "expectancy_usd": -2.7866,
+    "costs_usd": 37.12,
+    "bankrupt": false,
+    "risk_pct_max": 19.1982,
+    "trades_risk_pct_gt_20": 0,
+    "rejects_sl_ceiling": 4844
+  },
+  "by_strategy": {
+    "bee3": {
+      "initial_usd": 100.0,
+      "final_balance_usd": 19.19,
+      "net_pnl_usd": -80.81,
+      "return_pct": -80.81,
+      "max_dd_usd": 0.0,
+      "max_dd_pct": 0.0,
+      "trades": 29,
+      "wins": 11,
+      "win_rate": 0.3793,
+      "profit_factor": 0.4967,
+      "expectancy_usd": -2.7866,
+      "costs_usd": 37.12,
+      "bankrupt": false
+    }
+  },
+  "reject_counts": {
+    "bee3:already_open": 94,
+    "bee3:session_closed": 383,
+    "bee3:sl_ceiling": 4844,
+    "bee3:spread_unavailable": 14
+  },
+  "by_day_trades": {
+    "2026-01-05": 6,
+    "2026-01-06": 5,
+    "2026-01-08": 1,
+    "2026-01-09": 4,
+    "2026-01-12": 7,
+    "2026-01-19": 4,
+    "2026-07-24": 1,
+    "2026-07-28": 1
+  },
+  "by_regime": {
+    "trend_up": {
+      "trades": 15,
+      "net_pnl_usd": -27.97
+    },
+    "range": {
+      "trades": 11,
+      "net_pnl_usd": -23.83
+    },
+    "trend_down": {
+      "trades": 2,
+      "net_pnl_usd": -15.61
+    },
+    "wide": {
+      "trades": 1,
+      "net_pnl_usd": -13.4
+    }
+  }
+}

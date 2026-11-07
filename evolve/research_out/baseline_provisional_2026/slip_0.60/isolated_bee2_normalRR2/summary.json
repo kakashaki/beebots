@@ -1,0 +1,112 @@
+{
+  "label": "isolated_bee2_normalRR2",
+  "mode": "normalRR2",
+  "strategies": [
+    "bee2"
+  ],
+  "slippage_price_per_side": 0.6,
+  "slippage_status": "assumption_not_observed",
+  "initial_usd": 100.0,
+  "capital_mode": "isolated",
+  "provider": "icdemo_m5_hc_utc_converted_2026",
+  "segment": "2026_sample_inside_predeclared_holdout",
+  "evolution_eligible": false,
+  "full_period": false,
+  "historical_performance": false,
+  "provisional_2026": true,
+  "gate_replay": false,
+  "summary": {
+    "initial_usd": 100.0,
+    "final_balance_usd": 15.34,
+    "net_pnl_usd": -84.66,
+    "return_pct": -84.66,
+    "max_dd_usd": 219.94,
+    "max_dd_pct": 219.94,
+    "trades": 91,
+    "wins": 31,
+    "win_rate": 0.3407,
+    "profit_factor": 0.8899,
+    "expectancy_usd": -0.9303,
+    "costs_usd": 116.48,
+    "bankrupt": false,
+    "risk_pct_max": 19.1246,
+    "trades_risk_pct_gt_20": 0,
+    "rejects_sl_ceiling": 1670
+  },
+  "by_strategy": {
+    "bee2": {
+      "initial_usd": 100.0,
+      "final_balance_usd": 15.34,
+      "net_pnl_usd": -84.66,
+      "return_pct": -84.66,
+      "max_dd_usd": 0.0,
+      "max_dd_pct": 0.0,
+      "trades": 91,
+      "wins": 31,
+      "win_rate": 0.3407,
+      "profit_factor": 0.8899,
+      "expectancy_usd": -0.9303,
+      "costs_usd": 116.48,
+      "bankrupt": false
+    }
+  },
+  "reject_counts": {
+    "bee2:already_open": 138,
+    "bee2:sl_ceiling": 1670,
+    "bee2:session_closed": 75,
+    "bee2:spread_unavailable": 8
+  },
+  "by_day_trades": {
+    "2026-01-08": 1,
+    "2026-01-09": 1,
+    "2026-01-12": 8,
+    "2026-01-13": 3,
+    "2026-01-14": 1,
+    "2026-01-15": 2,
+    "2026-01-16": 1,
+    "2026-01-19": 3,
+    "2026-01-20": 7,
+    "2026-01-21": 6,
+    "2026-01-22": 8,
+    "2026-01-23": 5,
+    "2026-01-26": 5,
+    "2026-01-27": 5,
+    "2026-01-28": 6,
+    "2026-02-04": 1,
+    "2026-02-12": 1,
+    "2026-02-13": 1,
+    "2026-02-16": 1,
+    "2026-02-17": 1,
+    "2026-02-18": 4,
+    "2026-02-19": 2,
+    "2026-02-20": 1,
+    "2026-02-23": 6,
+    "2026-02-24": 2,
+    "2026-02-25": 2,
+    "2026-02-26": 1,
+    "2026-03-18": 1,
+    "2026-04-28": 1,
+    "2026-09-30": 1,
+    "2026-10-05": 1,
+    "2026-10-07": 1,
+    "2026-10-19": 1
+  },
+  "by_regime": {
+    "range": {
+      "trades": 19,
+      "net_pnl_usd": -22.15
+    },
+    "trend_up": {
+      "trades": 60,
+      "net_pnl_usd": -120.52
+    },
+    "trend_down": {
+      "trades": 9,
+      "net_pnl_usd": -19.97
+    },
+    "wide": {
+      "trades": 3,
+      "net_pnl_usd": 77.98
+    }
+  }
+}

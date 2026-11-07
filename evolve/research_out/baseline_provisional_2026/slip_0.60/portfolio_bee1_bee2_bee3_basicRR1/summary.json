@@ -1,0 +1,132 @@
+{
+  "label": "portfolio_bee1_bee2_bee3_basicRR1",
+  "mode": "basicRR1",
+  "strategies": [
+    "bee1",
+    "bee2",
+    "bee3"
+  ],
+  "slippage_price_per_side": 0.6,
+  "slippage_status": "assumption_not_observed",
+  "initial_usd": 100.0,
+  "capital_mode": "shared",
+  "provider": "icdemo_m5_hc_utc_converted_2026",
+  "segment": "2026_sample_inside_predeclared_holdout",
+  "evolution_eligible": false,
+  "full_period": false,
+  "historical_performance": false,
+  "provisional_2026": true,
+  "gate_replay": false,
+  "summary": {
+    "initial_usd": 100.0,
+    "final_balance_usd": 14.86,
+    "net_pnl_usd": -85.14,
+    "return_pct": -85.14,
+    "max_dd_usd": 85.28,
+    "max_dd_pct": 85.28,
+    "trades": 32,
+    "wins": 12,
+    "win_rate": 0.375,
+    "profit_factor": 0.5123,
+    "expectancy_usd": -2.6606,
+    "costs_usd": 40.96,
+    "bankrupt": false,
+    "risk_pct_max": 19.2337,
+    "trades_risk_pct_gt_20": 0,
+    "rejects_sl_ceiling": 7633
+  },
+  "by_strategy": {
+    "bee1": {
+      "initial_usd": null,
+      "final_balance_usd": null,
+      "net_pnl_usd": -23.29,
+      "return_pct": null,
+      "max_dd_usd": 0.0,
+      "max_dd_pct": null,
+      "trades": 4,
+      "wins": 1,
+      "win_rate": 0.25,
+      "profit_factor": 0.2838,
+      "expectancy_usd": -5.8225,
+      "costs_usd": 5.12,
+      "bankrupt": false,
+      "note": "attribution inside a shared book; initial is the book initial, not per bee"
+    },
+    "bee2": {
+      "initial_usd": null,
+      "final_balance_usd": null,
+      "net_pnl_usd": -34.31,
+      "return_pct": null,
+      "max_dd_usd": 0.0,
+      "max_dd_pct": null,
+      "trades": 5,
+      "wins": 0,
+      "win_rate": 0.0,
+      "profit_factor": 0.0,
+      "expectancy_usd": -6.862,
+      "costs_usd": 6.4,
+      "bankrupt": false,
+      "note": "attribution inside a shared book; initial is the book initial, not per bee"
+    },
+    "bee3": {
+      "initial_usd": null,
+      "final_balance_usd": null,
+      "net_pnl_usd": -27.54,
+      "return_pct": null,
+      "max_dd_usd": 0.0,
+      "max_dd_pct": null,
+      "trades": 23,
+      "wins": 11,
+      "win_rate": 0.4783,
+      "profit_factor": 0.7444,
+      "expectancy_usd": -1.1974,
+      "costs_usd": 29.44,
+      "bankrupt": false,
+      "note": "attribution inside a shared book; initial is the book initial, not per bee"
+    }
+  },
+  "reject_counts": {
+    "bee3:already_open": 79,
+    "bee3:session_closed": 383,
+    "bee3:correlated_stack": 10,
+    "bee1:sl_ceiling": 890,
+    "bee2:sl_ceiling": 1888,
+    "bee2:correlated_stack": 5,
+    "bee1:already_open": 1,
+    "bee3:sl_ceiling": 4855,
+    "bee2:already_open": 1,
+    "bee2:session_closed": 75,
+    "bee1:session_closed": 20,
+    "bee1:spread_unavailable": 8,
+    "bee2:spread_unavailable": 8,
+    "bee3:spread_unavailable": 14
+  },
+  "by_day_trades": {
+    "2026-01-05": 6,
+    "2026-01-06": 5,
+    "2026-01-08": 3,
+    "2026-01-09": 3,
+    "2026-01-12": 8,
+    "2026-01-13": 1,
+    "2026-01-19": 5,
+    "2026-10-19": 1
+  },
+  "by_regime": {
+    "trend_up": {
+      "trades": 20,
+      "net_pnl_usd": -23.65
+    },
+    "range": {
+      "trades": 8,
+      "net_pnl_usd": -22.56
+    },
+    "trend_down": {
+      "trades": 3,
+      "net_pnl_usd": -25.88
+    },
+    "wide": {
+      "trades": 1,
+      "net_pnl_usd": -13.05
+    }
+  }
+}

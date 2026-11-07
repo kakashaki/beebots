@@ -23,7 +23,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
-    "test:recovery": "vitest run beebots_mt5/src/mt5/recovery.test.ts beebots_mt5/src/mt5/demo-scalp.test.ts",
+    "test:recovery": "vitest run beebots_mt5/src/mt5/recovery.test.ts beebots_mt5/src/mt5/demo-scalp.test.ts beebots_mt5/src/mt5/hist-eval.test.ts",
     "typecheck:recovery": "tsc -p beebots_mt5/tsconfig.json --noEmit",
     "universe": "tsx src/tools/universe.ts",
     "snapshot": "tsx src/tools/snapshot.ts",

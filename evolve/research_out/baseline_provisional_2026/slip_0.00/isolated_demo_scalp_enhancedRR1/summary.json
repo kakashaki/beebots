@@ -1,0 +1,99 @@
+{
+  "label": "isolated_demo_scalp_enhancedRR1",
+  "mode": "enhancedRR1",
+  "strategies": [
+    "demo_scalp"
+  ],
+  "slippage_price_per_side": 0.0,
+  "slippage_status": "assumption_not_observed",
+  "initial_usd": 100.0,
+  "capital_mode": "isolated",
+  "provider": "icdemo_m5_hc_utc_converted_2026",
+  "segment": "2026_sample_inside_predeclared_holdout",
+  "evolution_eligible": false,
+  "full_period": false,
+  "historical_performance": false,
+  "provisional_2026": true,
+  "gate_replay": false,
+  "summary": {
+    "initial_usd": 100.0,
+    "final_balance_usd": 13.06,
+    "net_pnl_usd": -86.94,
+    "return_pct": -86.94,
+    "max_dd_usd": 98.94,
+    "max_dd_pct": 98.94,
+    "trades": 46,
+    "wins": 19,
+    "win_rate": 0.413,
+    "profit_factor": 0.5507,
+    "expectancy_usd": -1.89,
+    "costs_usd": 3.68,
+    "bankrupt": false,
+    "risk_pct_max": 19.2175,
+    "trades_risk_pct_gt_20": 0,
+    "rejects_sl_ceiling": 11188
+  },
+  "by_strategy": {
+    "demo_scalp": {
+      "initial_usd": 100.0,
+      "final_balance_usd": 13.06,
+      "net_pnl_usd": -86.94,
+      "return_pct": -86.94,
+      "max_dd_usd": 0.0,
+      "max_dd_pct": 0.0,
+      "trades": 46,
+      "wins": 19,
+      "win_rate": 0.413,
+      "profit_factor": 0.5507,
+      "expectancy_usd": -1.89,
+      "costs_usd": 3.68,
+      "bankrupt": false
+    }
+  },
+  "reject_counts": {
+    "demo_scalp:already_open": 105,
+    "demo_scalp:sl_ceiling": 11188,
+    "demo_scalp:session_closed": 529,
+    "demo_scalp:cooldown": 2,
+    "demo_scalp:spread_unavailable": 44
+  },
+  "by_day_trades": {
+    "2026-01-05": 9,
+    "2026-01-06": 2,
+    "2026-01-07": 2,
+    "2026-01-08": 2,
+    "2026-01-16": 1,
+    "2026-01-19": 1,
+    "2026-04-27": 3,
+    "2026-04-28": 5,
+    "2026-04-29": 5,
+    "2026-04-30": 2,
+    "2026-05-01": 2,
+    "2026-05-05": 1,
+    "2026-05-13": 1,
+    "2026-05-14": 1,
+    "2026-05-25": 5,
+    "2026-05-26": 1,
+    "2026-06-01": 1,
+    "2026-07-06": 1,
+    "2026-10-12": 1
+  },
+  "by_regime": {
+    "trend_up": {
+      "trades": 20,
+      "net_pnl_usd": -44.74
+    },
+    "trend_down": {
+      "trades": 14,
+      "net_pnl_usd": -53.13
+    },
+    "range": {
+      "trades": 10,
+      "net_pnl_usd": 22.07
+    },
+    "wide": {
+      "trades": 2,
+      "net_pnl_usd": -11.14
+    }
+  }
+}

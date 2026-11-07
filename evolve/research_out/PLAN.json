@@ -1,0 +1,53 @@
+{
+  "status": "not_started",
+  "evolution_running": false,
+  "paid_call": false,
+  "reason": "train_and_validation_years_absent_and_budget_not_confirmed",
+  "parents": {
+    "bee2": {
+      "file": "evolve/fixtures/live/bee2-1acecae64173.py",
+      "sha256": "7aac9a85e5d04c0b613e8ff902406b5b5bd71ca3792ec835d8776dfadb3204ce",
+      "role": "frozen real-demo parent"
+    },
+    "bee3": {
+      "file": "evolve/fixtures/live/bee3-4c1fc68dfb92.py",
+      "sha256": "2d3b8788897d574910df43ecfb31263557c7e764a9a9c7429ceaab19a8d06802",
+      "role": "frozen real-demo parent"
+    },
+    "bee1": {
+      "status": "source_now_in_bundle_but_batch_waits",
+      "file": "evolve/fixtures/live/bee1-8438d7c43755.py",
+      "sha256": "a2cea18ff2c29a627066f6c425d0e4dfcfd17838bdf7e2d840088f05c7070f32",
+      "note": "backtest only; not a live enable"
+    }
+  },
+  "splits_utc": {
+    "train": "2021-01-01 .. 2023-12-31",
+    "validation": "2024-01-01 .. 2025-06-30",
+    "holdout": "2025-07-01 .. 2026-11-07",
+    "holdout_rule": "not passed to prompts, selection, or evaluator return values"
+  },
+  "budget": {
+    "order": [
+      "bee2",
+      "bee3"
+    ],
+    "bee1": "program file is present for backtest; do not evolve it in the first batch",
+    "max_iterations_per_bee": 1,
+    "max_llm_calls_per_bee": 2,
+    "max_wall_seconds_per_bee": 1200,
+    "box_default_iterations_not_used": 20,
+    "stop_on_first_evaluator_error": true,
+    "stop_if_coverage_not_full_period": true,
+    "stop_if_proxy_not_200": true,
+    "new_provider_signup": false,
+    "population_dir": "evolve/research_out/oe_db_snapshot (copy; state/oe_db is not deleted)",
+    "candidate_dir": "evolve/research_out/candidates/<bee>",
+    "never_overwrite": [
+      "evolve/fixtures/live",
+      "state/oe_db",
+      "runtime promoted paths"
+    ]
+  },
+  "command_when_ready": "python3 evolve/lib/research_batch.py run --confirm-budget  (refuses today)"
+}

@@ -1,0 +1,50 @@
+{
+  "requested": "2021-01-01 through 2026-11-07",
+  "observed_start": "2026-01-01T23:00:00Z",
+  "observed_end": "2026-11-06T21:55:00Z",
+  "rows": 59734,
+  "by_year": {
+    "2021": {
+      "expected_open_m5": 68110,
+      "present": 0,
+      "coverage": 0.0,
+      "status": "missing_entirely"
+    },
+    "2022": {
+      "expected_open_m5": 67860,
+      "present": 0,
+      "coverage": 0.0,
+      "status": "missing_entirely"
+    },
+    "2023": {
+      "expected_open_m5": 67871,
+      "present": 0,
+      "coverage": 0.0,
+      "status": "missing_entirely"
+    },
+    "2024": {
+      "expected_open_m5": 68382,
+      "present": 0,
+      "coverage": 0.0,
+      "status": "missing_entirely"
+    },
+    "2025": {
+      "expected_open_m5": 68121,
+      "present": 0,
+      "coverage": 0.0,
+      "status": "missing_entirely"
+    },
+    "2026": {
+      "expected_open_m5": 57931,
+      "present": 59734,
+      "coverage": 1.0311,
+      "status": "ok"
+    }
+  },
+  "gaps_gt_5m": 225,
+  "gaps_ge_2h": 51,
+  "max_gap_hours": 73.083,
+  "full_period": false,
+  "historical_performance": false,
+  "note": "Missing years are not filled. A 2026 sample is not a 2021-2026 result."
+}
