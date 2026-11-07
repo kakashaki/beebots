@@ -1,0 +1,36 @@
+{
+  "rows": 12865,
+  "messages": {
+    "openjev call": 675,
+    "openjev verdict ignored, code chooser": 334,
+    "entry gate": 11776,
+    "evolve gated": 80
+  },
+  "fields": {
+    "logged_at_utc": 12865,
+    "msg": 12865,
+    "bee": 12785,
+    "latencyMs": 675,
+    "choice": 12110,
+    "confidence": 334,
+    "minConfidence": 334,
+    "side": 11856,
+    "ok": 11776,
+    "outcome": 11856,
+    "jev": 11776,
+    "conf": 11776,
+    "kronosAtr": 11776,
+    "src": 82,
+    "id": 80,
+    "why": 80
+  },
+  "exact_recovery_noise_replay": false,
+  "reason": "entry-gate rows have kronosAtr and jev choice/conf, not Kronos std/agree, not a bar id, and not quote age. logged_at_utc is availability, not the bar. ATR alone is not a gate. Window is 2026-10-28 to 2026-11-05 only.",
+  "missing_fields": [
+    "bar_open",
+    "quote_age_ms",
+    "move_std_px",
+    "agree_share",
+    "kronos_certain"
+  ]
+}

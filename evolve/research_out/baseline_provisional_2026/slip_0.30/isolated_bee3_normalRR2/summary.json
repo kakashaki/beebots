@@ -1,0 +1,113 @@
+{
+  "label": "isolated_bee3_normalRR2",
+  "mode": "normalRR2",
+  "strategies": [
+    "bee3"
+  ],
+  "slippage_price_per_side": 0.3,
+  "slippage_status": "assumption_not_observed",
+  "initial_usd": 100.0,
+  "capital_mode": "isolated",
+  "provider": "icdemo_m5_hc_utc_converted_2026",
+  "segment": "tainted_2026_parent_baseline",
+  "evolution_eligible": false,
+  "full_period": false,
+  "historical_performance": false,
+  "provisional_2026": true,
+  "gate_replay": false,
+  "summary": {
+    "initial_usd": 100.0,
+    "final_balance_usd": 15.52,
+    "net_pnl_usd": -84.48,
+    "return_pct": -84.48,
+    "max_dd_usd": 84.48,
+    "max_dd_pct": 84.48,
+    "trades": 13,
+    "wins": 1,
+    "win_rate": 0.0769,
+    "profit_factor": 0.1801,
+    "expectancy_usd": -6.4985,
+    "costs_usd": 8.84,
+    "bankrupt": false,
+    "risk_pct_max": 19.2073,
+    "trades_risk_pct_gt_20": 0,
+    "rejects_sl_ceiling": 4891
+  },
+  "by_strategy": {
+    "bee3": {
+      "initial_usd": 100.0,
+      "final_balance_usd": 15.52,
+      "net_pnl_usd": -84.48,
+      "return_pct": -84.48,
+      "max_dd_usd": 0.0,
+      "max_dd_pct": 0.0,
+      "trades": 13,
+      "wins": 1,
+      "win_rate": 0.0769,
+      "profit_factor": 0.1801,
+      "expectancy_usd": -6.4985,
+      "costs_usd": 8.84,
+      "bankrupt": false
+    }
+  },
+  "reject_counts": {
+    "bee3:already_open": 63,
+    "bee3:session_closed": 383,
+    "bee3:sl_ceiling": 4891,
+    "bee3:spread_unavailable": 14
+  },
+  "by_day_trades": {
+    "2026-01-05": 4,
+    "2026-01-06": 3,
+    "2026-01-08": 1,
+    "2026-01-09": 1,
+    "2026-01-12": 1,
+    "2026-01-19": 2,
+    "2026-10-27": 1
+  },
+  "by_regime": {
+    "trend_up": {
+      "trades": 8,
+      "net_pnl_usd": -42.79
+    },
+    "range": {
+      "trades": 4,
+      "net_pnl_usd": -31.78
+    },
+    "trend_down": {
+      "trades": 1,
+      "net_pnl_usd": -9.91
+    }
+  },
+  "pristine_holdout": false,
+  "parent_provenance": {
+    "created": "2026-11-04 ICT",
+    "selection_activity": "backtests run 2026-10-30 through 2026-11-04",
+    "selection_design": "40-day train and 10-day OOS ending 2026-11-04",
+    "pristine_holdout": false,
+    "new_research_withheld_from": "2025-07-01 UTC",
+    "note": "The withheld window applies to new research that has not seen those bars. It is not an unseen holdout for these parents."
+  },
+  "drawdown_interpretation": {
+    "published_max_dd_usd_is": "close_mark_to_market_equity_peak_to_trough",
+    "replay_max_dd_cash_usd": 84.48,
+    "replay_max_dd_mtm_usd": 84.48,
+    "replay_cash_peak_usd": 100.0,
+    "replay_mtm_peak_usd": 100.0,
+    "replay_cash_trough_usd": 15.52,
+    "replay_mtm_trough_usd": 15.52,
+    "exceeds_initial_because_peak_above_initial": false,
+    "cash_nonpositive": false,
+    "mtm_nonpositive": false,
+    "margin_rate": null,
+    "max_open_notional_usd": 4679.24,
+    "max_open_planned_risk_usd": 13.03
+  },
+  "cost_interpretation": {
+    "published_costs_usd_is": "commission_plus_both_fill_slippage_already_inside_pnl",
+    "do_not_subtract_costs_usd_from_net_pnl": true,
+    "level_exit_cash_slippage_sides": 1,
+    "gap_or_mark_cash_slippage_sides": 2,
+    "spread": "embedded in the bid/ask fills, not a second debit"
+  }
+}

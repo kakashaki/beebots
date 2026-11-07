@@ -1,0 +1,146 @@
+{
+  "label": "portfolio_bee2_bee3_basicRR1",
+  "mode": "basicRR1",
+  "strategies": [
+    "bee2",
+    "bee3"
+  ],
+  "slippage_price_per_side": 0.3,
+  "slippage_status": "assumption_not_observed",
+  "initial_usd": 100.0,
+  "capital_mode": "shared",
+  "provider": "icdemo_m5_hc_utc_converted_2026",
+  "segment": "tainted_2026_parent_baseline",
+  "evolution_eligible": false,
+  "full_period": false,
+  "historical_performance": false,
+  "provisional_2026": true,
+  "gate_replay": false,
+  "summary": {
+    "initial_usd": 100.0,
+    "final_balance_usd": 15.23,
+    "net_pnl_usd": -84.77,
+    "return_pct": -84.77,
+    "max_dd_usd": 113.05,
+    "max_dd_pct": 113.05,
+    "trades": 44,
+    "wins": 18,
+    "win_rate": 0.4091,
+    "profit_factor": 0.6462,
+    "expectancy_usd": -1.9266,
+    "costs_usd": 29.92,
+    "bankrupt": false,
+    "risk_pct_max": 19.2259,
+    "trades_risk_pct_gt_20": 0,
+    "rejects_sl_ceiling": 6701
+  },
+  "by_strategy": {
+    "bee2": {
+      "initial_usd": null,
+      "final_balance_usd": null,
+      "net_pnl_usd": -63.37,
+      "return_pct": null,
+      "max_dd_usd": 0.0,
+      "max_dd_pct": null,
+      "trades": 19,
+      "wins": 6,
+      "win_rate": 0.3158,
+      "profit_factor": 0.5064,
+      "expectancy_usd": -3.3353,
+      "costs_usd": 12.92,
+      "bankrupt": false,
+      "note": "attribution inside a shared book; initial is the book initial, not per bee"
+    },
+    "bee3": {
+      "initial_usd": null,
+      "final_balance_usd": null,
+      "net_pnl_usd": -21.4,
+      "return_pct": null,
+      "max_dd_usd": 0.0,
+      "max_dd_pct": null,
+      "trades": 25,
+      "wins": 12,
+      "win_rate": 0.48,
+      "profit_factor": 0.8075,
+      "expectancy_usd": -0.856,
+      "costs_usd": 17.0,
+      "bankrupt": false,
+      "note": "attribution inside a shared book; initial is the book initial, not per bee"
+    }
+  },
+  "reject_counts": {
+    "bee3:already_open": 77,
+    "bee3:session_closed": 383,
+    "bee2:already_open": 10,
+    "bee3:correlated_stack": 33,
+    "bee2:correlated_stack": 1,
+    "bee2:sl_ceiling": 1869,
+    "bee3:sl_ceiling": 4832,
+    "bee2:session_closed": 75,
+    "bee2:spread_unavailable": 8,
+    "bee3:spread_unavailable": 14
+  },
+  "by_day_trades": {
+    "2026-01-05": 5,
+    "2026-01-06": 5,
+    "2026-01-08": 3,
+    "2026-01-09": 5,
+    "2026-01-12": 15,
+    "2026-01-13": 1,
+    "2026-01-14": 1,
+    "2026-01-19": 4,
+    "2026-07-21": 1,
+    "2026-07-24": 2,
+    "2026-07-28": 1,
+    "2026-10-19": 1
+  },
+  "by_regime": {
+    "trend_up": {
+      "trades": 26,
+      "net_pnl_usd": 3.76
+    },
+    "range": {
+      "trades": 12,
+      "net_pnl_usd": -23.27
+    },
+    "trend_down": {
+      "trades": 4,
+      "net_pnl_usd": -35.83
+    },
+    "wide": {
+      "trades": 2,
+      "net_pnl_usd": -29.43
+    }
+  },
+  "pristine_holdout": false,
+  "parent_provenance": {
+    "created": "2026-11-04 ICT",
+    "selection_activity": "backtests run 2026-10-30 through 2026-11-04",
+    "selection_design": "40-day train and 10-day OOS ending 2026-11-04",
+    "pristine_holdout": false,
+    "new_research_withheld_from": "2025-07-01 UTC",
+    "note": "The withheld window applies to new research that has not seen those bars. It is not an unseen holdout for these parents."
+  },
+  "drawdown_interpretation": {
+    "published_max_dd_usd_is": "close_mark_to_market_equity_peak_to_trough",
+    "replay_max_dd_cash_usd": 106.26,
+    "replay_max_dd_mtm_usd": 113.05,
+    "replay_cash_peak_usd": 121.49,
+    "replay_mtm_peak_usd": 128.28,
+    "replay_cash_trough_usd": 15.23,
+    "replay_mtm_trough_usd": 15.23,
+    "exceeds_initial_because_peak_above_initial": true,
+    "cash_nonpositive": false,
+    "mtm_nonpositive": false,
+    "margin_rate": null,
+    "max_open_notional_usd": 4679.24,
+    "max_open_planned_risk_usd": 16.76
+  },
+  "cost_interpretation": {
+    "published_costs_usd_is": "commission_plus_both_fill_slippage_already_inside_pnl",
+    "do_not_subtract_costs_usd_from_net_pnl": true,
+    "level_exit_cash_slippage_sides": 1,
+    "gap_or_mark_cash_slippage_sides": 2,
+    "spread": "embedded in the bid/ask fills, not a second debit"
+  }
+}
