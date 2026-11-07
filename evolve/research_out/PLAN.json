@@ -15,39 +15,47 @@
       "role": "frozen real-demo parent"
     },
     "bee1": {
-      "status": "source_now_in_bundle_but_batch_waits",
+      "status": "in_first_research_batch_runtime_off",
       "file": "evolve/fixtures/live/bee1-8438d7c43755.py",
       "sha256": "a2cea18ff2c29a627066f6c425d0e4dfcfd17838bdf7e2d840088f05c7070f32",
-      "note": "backtest only; not a live enable"
+      "note": "backtest and copied-population research only; not a live enable"
     }
   },
   "splits_utc": {
     "train": "2021-01-01 .. 2023-12-31",
     "validation": "2024-01-01 .. 2025-06-30",
-    "holdout": "2025-07-01 .. 2026-11-07",
-    "holdout_rule": "not passed to prompts, selection, or evaluator return values"
+    "withheld_from_new_research": "2025-07-01 .. 2026-11-07",
+    "current_parents_pristine_holdout": false,
+    "parent_provenance": "created 2026-11-04 ICT; selected from backtests run 2026-10-30 through 2026-11-04 using 40-day train and 10-day OOS ending 2026-11-04",
+    "holdout_rule": "2025-07-01 onward is withheld from new research only. It is not an unseen holdout for the current parents, and it is not passed to prompts or selection."
   },
   "budget": {
     "order": [
       "bee2",
-      "bee3"
+      "bee3",
+      "bee1"
     ],
-    "bee1": "program file is present for backtest; do not evolve it in the first batch",
+    "bee1": "in the first research batch on a copied population; runtime stays off",
     "max_iterations_per_bee": 1,
     "max_llm_calls_per_bee": 2,
+    "max_tokens_per_completion": 15000,
     "max_wall_seconds_per_bee": 1200,
     "box_default_iterations_not_used": 20,
+    "dollar_cap_claimed": false,
+    "enforcement": "python3 evolve/lib/research_budget.py serve --upstream http://127.0.0.1:4183 --listen-port 4195",
+    "research_api_base": "http://127.0.0.1:4195/<bee>/v1",
     "stop_on_first_evaluator_error": true,
     "stop_if_coverage_not_full_period": true,
-    "stop_if_proxy_not_200": true,
+    "stop_if_bridge_health_not_200": true,
     "new_provider_signup": false,
     "population_dir": "evolve/research_out/oe_db_snapshot (copy; state/oe_db is not deleted)",
     "candidate_dir": "evolve/research_out/candidates/<bee>",
     "never_overwrite": [
       "evolve/fixtures/live",
       "state/oe_db",
-      "runtime promoted paths"
+      "runtime promoted paths",
+      "ports 4182 4183 4184"
     ]
   },
-  "command_when_ready": "python3 evolve/lib/research_batch.py run --confirm-budget  (refuses today)"
+  "command_when_ready": "not today. Preflight must pass, then the isolated proxy, then one iteration per bee."
 }

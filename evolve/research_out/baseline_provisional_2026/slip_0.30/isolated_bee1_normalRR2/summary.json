@@ -9,7 +9,7 @@
   "initial_usd": 100.0,
   "capital_mode": "isolated",
   "provider": "icdemo_m5_hc_utc_converted_2026",
-  "segment": "2026_sample_inside_predeclared_holdout",
+  "segment": "tainted_2026_parent_baseline",
   "evolution_eligible": false,
   "full_period": false,
   "historical_performance": false,
@@ -108,5 +108,36 @@
       "trades": 3,
       "net_pnl_usd": -26.26
     }
+  },
+  "pristine_holdout": false,
+  "parent_provenance": {
+    "created": "2026-11-04 ICT",
+    "selection_activity": "backtests run 2026-10-30 through 2026-11-04",
+    "selection_design": "40-day train and 10-day OOS ending 2026-11-04",
+    "pristine_holdout": false,
+    "new_research_withheld_from": "2025-07-01 UTC",
+    "note": "The withheld window applies to new research that has not seen those bars. It is not an unseen holdout for these parents."
+  },
+  "drawdown_interpretation": {
+    "published_max_dd_usd_is": "close_mark_to_market_equity_peak_to_trough",
+    "replay_max_dd_cash_usd": 250.52,
+    "replay_max_dd_mtm_usd": 260.75,
+    "replay_cash_peak_usd": 273.84,
+    "replay_mtm_peak_usd": 284.07,
+    "replay_cash_trough_usd": 23.32,
+    "replay_mtm_trough_usd": 23.32,
+    "exceeds_initial_because_peak_above_initial": true,
+    "cash_nonpositive": false,
+    "mtm_nonpositive": false,
+    "margin_rate": null,
+    "max_open_notional_usd": 5559.98,
+    "max_open_planned_risk_usd": 45.2
+  },
+  "cost_interpretation": {
+    "published_costs_usd_is": "commission_plus_both_fill_slippage_already_inside_pnl",
+    "do_not_subtract_costs_usd_from_net_pnl": true,
+    "level_exit_cash_slippage_sides": 1,
+    "gap_or_mark_cash_slippage_sides": 2,
+    "spread": "embedded in the bid/ask fills, not a second debit"
   }
 }

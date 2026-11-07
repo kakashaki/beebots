@@ -1,11 +1,18 @@
 """Frozen-baseline price/setup evaluation and 2021-2026 coverage.
 
 Not a full-system replay: the gate log has no Kronos certainty fields and no bar id.
-2021-2025 are absent. Numbers from the 2026 file are a provisional baseline inside the
-predeclared holdout and are not an OpenEvolve score.
+2021-2025 are absent. The 2026 file is a tainted historical baseline for the current
+parents (selected through 2026-11-04). It is not an unseen holdout and not an OpenEvolve score.
+2025-07-01 onward is withheld from new research only.
 
 Initial capital is explicit. Isolated books each start at that capital. A combined book
 starts at that same capital once, shared. Bee1 is loaded only from a real program file.
+
+Drawdown is reported two ways. Cash drawdown is realized balance peak to trough.
+Mark-to-market drawdown is close equity (cash plus open bid/ask marks, minus the unpaid
+exit commission) peak to trough. A drawdown larger than the initial cash is a giveback
+from a higher peak, not a second copy of the loss. Spread and slippage sit inside the
+fill prices. Commission is the only extra cash debit. None of those components is subtracted again.
 """
 from __future__ import annotations
 
@@ -22,6 +29,8 @@ WARMUP_BARS = 300
 LOT = 0.01
 CONTRACT = 100
 POINT_VALUE = LOT * CONTRACT
+# The 2026 file's spread p99 is 0.10. One bar prints 584.28, which is not a usable ask.
+SPREAD_UNUSABLE = 5.0
 SL_MULT = 1.5 * 3 ** 0.5
 MIN_SL_ATR = 1.0
 MAX_SL_ATR = 2.0
@@ -38,6 +47,14 @@ MODES = {
     "normalRR2": {"rr": 2, "scalp": False, "same_side_block": False},
     "basicRR1": {"rr": 1, "scalp": False, "same_side_block": True},
     "enhancedRR1": {"rr": 1, "scalp": True, "same_side_block": True},
+}
+PARENT_PROVENANCE = {
+    "created": "2026-11-04 ICT",
+    "selection_activity": "backtests run 2026-10-30 through 2026-11-04",
+    "selection_design": "40-day train and 10-day OOS ending 2026-11-04",
+    "pristine_holdout": False,
+    "new_research_withheld_from": "2025-07-01 UTC",
+    "note": "The withheld window applies to new research that has not seen those bars. It is not an unseen holdout for these parents.",
 }
 
 def iso(sec):
@@ -147,6 +164,25 @@ def sl_plan(atr, balance):
         return None, "sl_ceiling"
     return dist, None
 
+def _resolve_spread(bar, fallback):
+    """Bar spread when it is a usable open spread. Negative or above the unusable print is not an ask."""
+    sp = bar.get("spread")
+    if sp is None:
+        return fallback, "position_fallback"
+    if sp < 0 or sp > SPREAD_UNUSABLE:
+        return None, "unusable"
+    return sp, "bar"
+
+def slippage_cash_usd(reason, slip):
+    """Cash gap versus the same bracket rebuilt at zero slippage.
+
+    SL and TP are measured from the slipped fill, so the entry slip shifts the bracket and
+    the exit slip takes one side off a level fill. A gap or an end-of-data mark is not a
+    shifted bracket level, so both the entry slip and the exit slip stay in the cash result.
+    """
+    sides = 1 if reason in ("sl", "tp") else 2
+    return round(abs(slip) * sides * POINT_VALUE, 2)
+
 def _hit(side, sl, tp, bar, spread):
     if side == "buy":
         if bar["o"] <= sl:
@@ -182,53 +218,121 @@ def _stats(trades, initial, eq_dd, bankrupt, costs):
         "costs_usd": round(costs, 2), "bankrupt": bankrupt,
     }
 
+def _close_trade(p, bar_t, raw, why, slip, comm):
+    exit_px = round(raw - slip, 2) if p["side"] == "buy" else round(raw + slip, 2)
+    price = (1 if p["side"] == "buy" else -1) * (exit_px - p["entry"]) * POINT_VALUE
+    pnl = round(price - 2 * comm, 2)
+    slip_cash = slippage_cash_usd(why, slip)
+    return {
+        **{k: p[k] for k in ("strategy", "side", "entry_ts", "entry", "sl", "tp", "risk_usd", "risk_pct", "regime")},
+        "exit_ts": bar_t, "exit_reason": why, "exit_px": exit_px, "pnl_usd": pnl,
+        "price_pnl_usd": round(price, 2),
+        "commission_usd": round(2 * comm, 2),
+        "commission_entry_usd": comm, "commission_exit_usd": comm,
+        "slippage_cash_usd": slip_cash,
+        "slippage_both_fills_usd": round(abs(slip) * 2 * POINT_VALUE, 2),
+        "spread_embedded_usd": round(float(p["spread"]) * POINT_VALUE, 2),
+        "spread_and_slippage_inside_fills": True,
+    }, round(price - comm, 2)
+
 def simulate(bars, signals, mode, names, initial, slip, warmup=0):
-    """signals[name][i] = buy|sell|None. Fill is the next bar. Both stops in one bar: SL first."""
+    """signals[name][i] = buy|sell|None. Fill is the next bar. Both stops in one bar: SL first.
+
+    The 25% ceiling is per order against realized cash, matching the live balance check.
+    It is not raised. Open risk is reported, not used to waive that ceiling.
+    Margin rate is not in this repo, so notional is reported and not rejected.
+    """
     spec = MODES[mode]
     comm = commission_per_side_usd(LOT, COMMISSION_PER_LOT_SIDE)
     cash = float(initial)
-    peak = cash
-    max_dd = 0.0
+    cash_peak = cash_trough = float(initial)
+    mtm_peak = mtm_trough = float(initial)
+    max_dd_cash = 0.0
+    max_dd_mtm = 0.0
+    max_dd_adverse = 0.0
     positions = []
     trades = []
     rejects = []
     bankrupt = False
+    mtm_nonpositive = False
     last_scalp_i = None
+    max_open = 0
+    max_open_risk = 0.0
+    max_open_risk_pct_cash = 0.0
+    max_open_risk_pct_equity = 0.0
+    max_notional = 0.0
     order = [n for n in ("bee1", "bee2", "bee3", "demo_scalp") if n in names]
     atrs = signals.get("_atr", {})
 
-    def equity(i, mark):
+    def mark_px(p, bar, which):
+        sp, _how = _resolve_spread(bar, p["spread"])
+        if sp is None:
+            sp = p["spread"]
+        if p["side"] == "buy":
+            return bar[which], sp
+        return bar[which] + sp, sp
+
+    def equity_at(price_of):
         eq = cash
         for p in positions:
-            sp = bars[i]["spread"] if bars[i]["spread"] is not None else p["spread"]
-            px = mark if p["side"] == "buy" else mark + sp
+            px, _sp = price_of(p)
             eq += (1 if p["side"] == "buy" else -1) * (px - p["entry"]) * POINT_VALUE - comm
         return eq
+
+    def note_cash():
+        nonlocal cash_peak, cash_trough, max_dd_cash
+        if cash > cash_peak:
+            cash_peak = cash
+        if cash < cash_trough:
+            cash_trough = cash
+        max_dd_cash = max(max_dd_cash, cash_peak - cash)
+
+    def note_mtm(eq, adverse):
+        nonlocal mtm_peak, mtm_trough, max_dd_mtm, max_dd_adverse, mtm_nonpositive, bankrupt
+        if eq > mtm_peak:
+            mtm_peak = eq
+        if eq < mtm_trough:
+            mtm_trough = eq
+        max_dd_mtm = max(max_dd_mtm, mtm_peak - eq)
+        max_dd_adverse = max(max_dd_adverse, mtm_peak - adverse)
+        if eq <= 0:
+            mtm_nonpositive = True
+            bankrupt = True
 
     for i in range(len(bars)):
         bar = bars[i]
         kept = []
         for p in positions:
-            sp = bar["spread"] if bar["spread"] is not None else p["spread"]
-            hit = _hit(p["side"], p["sl"], p["tp"], bar, sp)
+            sp, how = _resolve_spread(bar, p["spread"])
+            if p["side"] == "sell" and how == "unusable":
+                kept.append(p)
+                continue
+            hit = _hit(p["side"], p["sl"], p["tp"], bar, 0.0 if sp is None else sp)
             if not hit:
                 kept.append(p)
                 continue
             raw, why = hit
-            exit_px = round(raw - slip, 2) if p["side"] == "buy" else round(raw + slip, 2)
-            price = (1 if p["side"] == "buy" else -1) * (exit_px - p["entry"]) * POINT_VALUE
-            pnl = round(price - 2 * comm, 2)
-            cash = round(cash + price - comm, 2)
-            slip_usd = abs(slip) * 2 * POINT_VALUE
-            trades.append({**{k: p[k] for k in ("strategy", "side", "entry_ts", "entry", "sl", "tp", "risk_usd", "risk_pct", "regime")},
-                           "exit_ts": bar["t"], "exit_reason": why, "exit_px": exit_px, "pnl_usd": pnl,
-                           "commission_usd": round(2 * comm, 2), "slippage_usd": round(slip_usd, 2)})
+            trade, cash_delta = _close_trade(p, bar["t"], raw, why, slip, comm)
+            trades.append(trade)
+            cash = round(cash + cash_delta, 2)
             if cash <= 0:
                 bankrupt = True
         positions = kept
-        eq = equity(i, bar["c"])
-        peak = max(peak, eq)
-        max_dd = max(max_dd, peak - eq)
+        note_cash()
+        eq = equity_at(lambda p: mark_px(p, bar, "c"))
+        adverse = equity_at(lambda p: mark_px(p, bar, "l" if p["side"] == "buy" else "h"))
+        note_mtm(eq, adverse)
+        open_risk = sum(p["risk_usd"] for p in positions)
+        notional = 0.0
+        for p in positions:
+            px, _sp = mark_px(p, bar, "c")
+            notional += abs(px) * POINT_VALUE
+        max_open = max(max_open, len(positions))
+        if open_risk > max_open_risk:
+            max_open_risk = open_risk
+            max_open_risk_pct_cash = (100.0 * open_risk / cash) if cash > 0 else None
+            max_open_risk_pct_equity = (100.0 * open_risk / eq) if eq > 0 else None
+        max_notional = max(max_notional, notional)
         if i < warmup or i + 1 >= len(bars) or bankrupt:
             continue
         nxt = bars[i + 1]
@@ -237,10 +341,12 @@ def simulate(bars, signals, mode, names, initial, slip, warmup=0):
                 if signals[name].get(i) in ("buy", "sell"):
                     rejects.append({"i": i, "strategy": name, "reason": "session_closed"})
             continue
-        if nxt["spread"] is None:
+        nxt_spread, nxt_how = _resolve_spread(nxt, None)
+        if nxt_how == "unusable" or nxt["spread"] is None:
+            reason = "spread_unusable" if nxt_how == "unusable" else "spread_unavailable"
             for name in order:
                 if signals[name].get(i) in ("buy", "sell"):
-                    rejects.append({"i": i, "strategy": name, "reason": "spread_unavailable"})
+                    rejects.append({"i": i, "strategy": name, "reason": reason})
             continue
         for name in order:
             side = signals[name].get(i)
@@ -271,16 +377,17 @@ def simulate(bars, signals, mode, names, initial, slip, warmup=0):
                 rejects.append({"i": i, "strategy": name, "reason": "insufficient_funds"})
                 bankrupt = cash <= 0
                 continue
-            spread = nxt["spread"]
+            spread = nxt_spread
             entry = round((nxt["o"] + spread + slip) if side == "buy" else (nxt["o"] - slip), 2)
             k = 1 if side == "buy" else -1
             sl = round(entry - k * dist, 2)
             tp = round(entry + k * spec["rr"] * dist, 2)
             risk = abs(entry - sl) * POINT_VALUE
-            if risk > MAX_SL_FRAC * cash:
+            if risk > MAX_SL_FRAC * cash + 1e-9:
                 rejects.append({"i": i, "strategy": name, "reason": "sl_ceiling"})
                 continue
             cash = round(cash - comm, 2)
+            note_cash()
             positions.append({
                 "strategy": name, "side": side, "entry": entry, "sl": sl, "tp": tp, "entry_ts": nxt["t"],
                 "risk_usd": round(risk, 2), "risk_pct": round(100.0 * risk / (cash + comm), 4),
@@ -288,29 +395,85 @@ def simulate(bars, signals, mode, names, initial, slip, warmup=0):
             })
             if name == "demo_scalp":
                 last_scalp_i = i
-    # mark leftover at the last bid/ask. Labeled end_of_data, not a target hit.
+        if positions:
+            open_risk = sum(p["risk_usd"] for p in positions)
+            if open_risk > max_open_risk:
+                max_open_risk = open_risk
+                max_open_risk_pct_cash = (100.0 * open_risk / cash) if cash > 0 else None
+                eq_now = equity_at(lambda p: mark_px(p, bars[min(i + 1, len(bars) - 1)], "o"))
+                max_open_risk_pct_equity = (100.0 * open_risk / eq_now) if eq_now > 0 else None
+            max_open = max(max_open, len(positions))
     if bars and positions:
         last = bars[-1]
         for p in positions:
-            sp = last["spread"] if last["spread"] is not None else p["spread"]
+            sp, _how = _resolve_spread(last, p["spread"])
+            if sp is None:
+                sp = p["spread"]
             raw = last["c"] if p["side"] == "buy" else last["c"] + sp
-            exit_px = round(raw - slip, 2) if p["side"] == "buy" else round(raw + slip, 2)
-            price = (1 if p["side"] == "buy" else -1) * (exit_px - p["entry"]) * POINT_VALUE
-            pnl = round(price - 2 * comm, 2)
-            cash = round(cash + price - comm, 2)
-            trades.append({**{k: p[k] for k in ("strategy", "side", "entry_ts", "entry", "sl", "tp", "risk_usd", "risk_pct", "regime")},
-                           "exit_ts": last["t"], "exit_reason": "end_of_data", "exit_px": exit_px, "pnl_usd": pnl,
-                           "commission_usd": round(2 * comm, 2), "slippage_usd": round(abs(slip) * 2 * POINT_VALUE, 2)})
-    costs = sum(t["commission_usd"] + t["slippage_usd"] for t in trades)
-    summary = _stats(trades, initial, max_dd, bankrupt or cash <= 0, costs)
+            trade, cash_delta = _close_trade(p, last["t"], raw, "end_of_data", slip, comm)
+            trades.append(trade)
+            cash = round(cash + cash_delta, 2)
+        positions = []
+        note_cash()
+    commission_usd = round(sum(t["commission_usd"] for t in trades), 2)
+    summary = _stats(trades, initial, max_dd_mtm, bankrupt or cash <= 0, commission_usd)
+    summary["final_balance_usd"] = round(cash, 2)
+    summary["net_pnl_usd"] = round(cash - initial, 2)
+    summary["return_pct"] = round(100.0 * (cash - initial) / initial, 4) if initial else None
+    summary["pnl_sum_usd"] = round(sum(t["pnl_usd"] for t in trades), 2)
+    summary["cash_vs_pnl_residual_usd"] = round(cash - (initial + summary["pnl_sum_usd"]), 2)
+    summary["max_dd_usd"] = round(max_dd_mtm, 2)
+    summary["max_dd_mtm_usd"] = round(max_dd_mtm, 2)
+    summary["max_dd_cash_usd"] = round(max_dd_cash, 2)
+    summary["max_dd_intrabar_adverse_usd"] = round(max_dd_adverse, 2)
+    summary["max_dd_definition"] = "close_mark_to_market_equity_peak_to_trough"
+    summary["cash_peak_usd"] = round(cash_peak, 2)
+    summary["cash_trough_usd"] = round(cash_trough, 2)
+    summary["mtm_peak_usd"] = round(mtm_peak, 2)
+    summary["mtm_trough_usd"] = round(mtm_trough, 2)
+    summary["dd_exceeds_initial"] = bool(max_dd_mtm > initial)
+    summary["dd_exceeds_initial_because_peak_above_initial"] = bool(max_dd_mtm > initial and mtm_peak > initial)
+    summary["costs_usd_meaning"] = "commission_only_already_inside_pnl"
+    summary["cost_components"] = {
+        "commission_usd": commission_usd,
+        "slippage_cash_usd": round(sum(t["slippage_cash_usd"] for t in trades), 2),
+        "slippage_both_fills_usd": round(sum(t["slippage_both_fills_usd"] for t in trades), 2),
+        "spread_embedded_usd": round(sum(t["spread_embedded_usd"] for t in trades), 2),
+        "included_in_pnl": True,
+        "subtract_again": False,
+        "level_exit_slippage_sides_in_cash": 1,
+        "gap_or_mark_slippage_sides_in_cash": 2,
+    }
     risks = [t["risk_pct"] for t in trades]
     summary["risk_pct_max"] = max(risks) if risks else None
     summary["trades_risk_pct_gt_20"] = sum(1 for x in risks if x is not None and x > 20)
     summary["rejects_sl_ceiling"] = sum(1 for r in rejects if r["reason"] == "sl_ceiling")
+    summary["rejects_spread_unusable"] = sum(1 for r in rejects if r["reason"] == "spread_unusable")
+    summary["gap_exits"] = sum(1 for t in trades if t["exit_reason"] == "sl_gap")
+    summary["gap_loss_beyond_planned_risk"] = sum(
+        1 for t in trades if t["exit_reason"] == "sl_gap" and t["pnl_usd"] < -(t["risk_usd"] + t["commission_usd"])
+    )
+    summary["max_open_positions"] = max_open
+    summary["max_open_planned_risk_usd"] = round(max_open_risk, 2)
+    summary["max_open_planned_risk_pct_of_cash"] = None if not max_open_risk else round(max_open_risk_pct_cash, 4)
+    summary["max_open_planned_risk_pct_of_equity"] = None if not max_open_risk else round(max_open_risk_pct_equity, 4)
+    summary["ceiling_basis"] = "per_order_realized_cash"
+    summary["max_open_notional_usd"] = round(max_notional, 2)
+    summary["margin_rate"] = None
+    summary["margin_checked"] = False
+    summary["mtm_nonpositive"] = mtm_nonpositive
+    summary["invariants"] = {
+        "cash_matches_pnl_sum": abs(summary["cash_vs_pnl_residual_usd"]) <= 0.02 * max(1, len(trades)),
+        "per_order_risk_pct_le_25": all(x is None or x <= 25.01 for x in risks),
+        "spread_and_slippage_not_subtracted_again": True,
+        "mtm_nonpositive": mtm_nonpositive,
+        "cash_nonpositive": cash <= 0,
+    }
     by = {}
     for name in order:
         owned = [t for t in trades if t["strategy"] == name]
-        by[name] = _stats(owned, initial if len(names) == 1 else None, 0.0, False, sum(t["commission_usd"] + t["slippage_usd"] for t in owned))
+        by[name] = _stats(owned, initial if len(names) == 1 else None, 0.0, False, sum(t["commission_usd"] for t in owned))
+        by[name]["costs_usd_meaning"] = "commission_only_already_inside_pnl"
         if len(names) != 1:
             by[name]["initial_usd"] = None
             by[name]["return_pct"] = None
@@ -318,7 +481,11 @@ def simulate(bars, signals, mode, names, initial, slip, warmup=0):
     return {"summary": summary, "by_strategy": by, "trades": trades, "rejects": rejects, "capital_mode": "isolated" if len(names) == 1 else "shared"}
 
 def selection_end_exclusive():
-    """Evolution may see train and validation only. Holdout starts 2025-07-01 UTC."""
+    """New research may see train and validation only. Bars at or after 2025-07-01 UTC are withheld.
+
+    This cutoff is not a claim that the current parents have an unseen holdout. Those parents
+    were selected on a 40-day/10-day window that ends 2026-11-04.
+    """
     return HOLDOUT_START
 
 def ms_to_open_sec(value):
@@ -431,7 +598,81 @@ def self_test():
     gapped = [dict(dense[0]), dict(dense[2]), {"t": 3600, "o": 1, "h": 1, "l": 1, "c": 1, "spread": 0.1, "provider": "dukascopy"}]
     check("h1_closed", len(resample_closed(dense, 3600)) == 1)
     check("h1_gap_dropped", resample_closed(gapped, 3600) == [])
-    print(json.dumps({"kind": "harness_fixture", "historical_performance": False, "full_period": False, "fails": fails}))
+    # Level fill, slip 0.30: cash slippage is one side. Spread stays inside the fill and is not subtracted again.
+    slip_bars = []
+    for i in range(4):
+        px = 100.0
+        slip_bars.append({"t": base + i * 300, "o": px, "h": px + 1, "l": px - 1, "c": px, "spread": 0.20, "source": "fixture"})
+    slip_bars[2]["h"] = 120
+    slip_bars[2]["l"] = 100
+    tp_book = simulate(slip_bars, {"bee2": {0: "buy"}, "_atr": {0: 2.0}, "_regime": {}}, "normalRR2", ["bee2"], 100.0, 0.30, warmup=0)
+    tp = tp_book["trades"][0]
+    check("tp_one", tp_book["summary"]["trades"] == 1 and tp["exit_reason"] == "tp")
+    check("tp_cash_slip_one_side", tp["slippage_cash_usd"] == 0.30 and tp["slippage_both_fills_usd"] == 0.60)
+    check("tp_pnl_not_double_counted", tp["pnl_usd"] == round(tp["price_pnl_usd"] - tp["commission_usd"], 2))
+    check("tp_spread_not_subtracted_again", tp["pnl_usd"] == 7.62)
+    check("tp_components_flag", tp_book["summary"]["cost_components"]["subtract_again"] is False)
+    check("tp_final_matches_cash", tp_book["summary"]["final_balance_usd"] == round(100 + tp["pnl_usd"], 2))
+    # Exact stop. Loss is planned risk plus one side of slippage plus commission.
+    sl_bars = [dict(b) for b in slip_bars]
+    sl_bars[2] = dict(sl_bars[2], h=101.0, l=90.0, o=100.0, c=99.0)
+    sl_book = simulate(sl_bars, {"bee2": {0: "buy"}, "_atr": {0: 2.0}, "_regime": {}}, "normalRR2", ["bee2"], 100.0, 0.30, warmup=0)
+    sl = sl_book["trades"][0]
+    check("sl_reason", sl["exit_reason"] == "sl")
+    check("sl_pnl", sl["pnl_usd"] == -4.38 and sl["slippage_cash_usd"] == 0.30)
+    check("sl_identity", sl["pnl_usd"] == round(-(sl["risk_usd"] + sl["slippage_cash_usd"] + sl["commission_usd"]), 2))
+    check("loser_final_below_initial", sl_book["summary"]["final_balance_usd"] < 100)
+    check("loser_dd_not_above_initial", sl_book["summary"]["max_dd_mtm_usd"] <= 100)
+    check("loser_cash_positive", sl_book["summary"]["cash_trough_usd"] > 0)
+    # Gap through the stop fills at the worse open and is not clamped back to the 25% ceiling.
+    gap_bars = [dict(b) for b in slip_bars]
+    gap_bars[2] = dict(gap_bars[2], o=90.0, h=91.0, l=89.0, c=90.0)
+    gap_book = simulate(gap_bars, {"bee2": {0: "buy"}, "_atr": {0: 2.0}, "_regime": {}}, "normalRR2", ["bee2"], 100.0, 0.30, warmup=0)
+    gap = gap_book["trades"][0]
+    check("gap_reason", gap["exit_reason"] == "sl_gap")
+    check("gap_worse_than_planned", gap["pnl_usd"] < -(gap["risk_usd"] + gap["commission_usd"]))
+    check("gap_both_slip_sides", gap["slippage_cash_usd"] == 0.60)
+    check("gap_not_clamped", gap_book["summary"]["gap_loss_beyond_planned_risk"] == 1)
+    check("gap_identity", abs(gap_book["summary"]["cash_vs_pnl_residual_usd"]) < 0.02)
+    # Profitable path that peaks well above 100 and then gives back more than the initial cash.
+    # Per-order risk stays inside 25% of realized cash. The drawdown is not clamped.
+    grow = []
+    for i in range(12):
+        grow.append({"t": base + i * 300, "o": 1000.0, "h": 1001.0, "l": 999.0, "c": 1000.0, "spread": 0.20, "source": "fixture"})
+    for exit_i in (2, 5, 8):
+        grow[exit_i]["h"] = 2000.0
+        grow[exit_i]["l"] = 1000.0
+    grow[11]["o"] = 850.0
+    grow[11]["h"] = 851.0
+    grow[11]["l"] = 849.0
+    grow[11]["c"] = 850.0
+    grow_sig = {"bee2": {0: "buy", 3: "buy", 6: "buy", 9: "buy"}, "_atr": {0: 9.0, 3: 12.0, 6: 15.0, 9: 10.0}, "_regime": {}}
+    grow_book = simulate(grow, grow_sig, "normalRR2", ["bee2"], 100.0, 0.0, warmup=0)
+    gs = grow_book["summary"]
+    check("grow_wins_then_gap", gs["trades"] == 4 and grow_book["trades"][-1]["exit_reason"] == "sl_gap")
+    check("grow_final_positive", gs["final_balance_usd"] > 0 and gs["mtm_peak_usd"] > 100)
+    check("grow_dd_above_initial_is_giveback", gs["dd_exceeds_initial"] and gs["dd_exceeds_initial_because_peak_above_initial"])
+    check("grow_cash_dd_separate", gs["max_dd_cash_usd"] > 0 and gs["max_dd_definition"].startswith("close_mark"))
+    check("grow_risk_ceiling_held", gs["invariants"]["per_order_risk_pct_le_25"] and gs["risk_pct_max"] <= 25.01)
+    check("grow_not_bankrupt", gs["bankrupt"] is False and gs["mtm_nonpositive"] is False)
+    check("grow_cash_identity", gs["invariants"]["cash_matches_pnl_sum"])
+    # A 584 print cannot open and cannot be used as a short ask.
+    bad = [dict(b) for b in slip_bars]
+    bad[1]["spread"] = 584.28
+    bad_book = simulate(bad, {"bee2": {0: "buy"}, "bee3": {0: "sell"}, "_atr": {0: 2.0}, "_regime": {}}, "normalRR2", ["bee2", "bee3"], 100.0, 0.0, warmup=0)
+    check("spread_584_rejected", bad_book["summary"]["trades"] == 0 and bad_book["summary"]["rejects_spread_unusable"] == 2)
+    # Two normalRR2 orders may stack. Each stays under the per-order ceiling. Aggregate risk is reported.
+    stack_bars = [dict(b) for b in slip_bars]
+    stack_bars[2]["l"] = 90
+    stack_bars[2]["h"] = 130
+    stack = simulate(stack_bars, {"bee2": {0: "buy"}, "bee3": {0: "sell"}, "_atr": {0: 2.0}, "_regime": {}}, "normalRR2", ["bee2", "bee3"], 100.0, 0.0, warmup=0)
+    check("stack_two", stack["summary"]["trades"] == 2 and stack["summary"]["max_open_positions"] == 2)
+    check("stack_each_under_ceiling", stack["summary"]["invariants"]["per_order_risk_pct_le_25"])
+    check("stack_risk_reported", stack["summary"]["max_open_planned_risk_usd"] > stack["trades"][0]["risk_usd"])
+    check("margin_not_invented", stack["summary"]["margin_rate"] is None and stack["summary"]["margin_checked"] is False)
+    print(json.dumps({"kind": "harness_fixture", "historical_performance": False, "full_period": False, "fails": fails,
+                      "grow_final": grow_book["summary"]["final_balance_usd"], "grow_mtm_peak": grow_book["summary"]["mtm_peak_usd"],
+                      "grow_dd_mtm": grow_book["summary"]["max_dd_mtm_usd"], "grow_dd_cash": grow_book["summary"]["max_dd_cash_usd"]}))
     if fails:
         raise SystemExit(1)
 
@@ -538,7 +779,9 @@ def run_provisional(primary_path, live_path, out_dir, initial, bee_paths, slip_v
                 "label": label, "mode": mode, "strategies": names, "slippage_price_per_side": slip,
                 "slippage_status": "assumption_not_observed", "initial_usd": initial,
                 "capital_mode": book["capital_mode"], "provider": PROVIDER_2026,
-                "segment": "2026_sample_inside_predeclared_holdout",
+                "segment": "tainted_2026_parent_baseline",
+                "pristine_holdout": False,
+                "parent_provenance": PARENT_PROVENANCE,
                 "evolution_eligible": False, "full_period": False, "historical_performance": False,
                 "provisional_2026": True, "gate_replay": False,
                 "summary": book["summary"], "by_strategy": book["by_strategy"],
@@ -559,12 +802,17 @@ def run_provisional(primary_path, live_path, out_dir, initial, bee_paths, slip_v
         "evolution_eligible": False,
         "provider": PROVIDER_2026,
         "pre_2026_provider": "absent_other_worker",
-        "holdout_rule": "2025-07-01 UTC onward is holdout. This 2026 sample sits inside it and is a frozen baseline only.",
+        "holdout_rule": "2025-07-01 UTC onward is withheld from new research only. This 2026 sample is a tainted baseline for parents selected through 2026-11-04. It is not an unseen holdout.",
+        "parent_baseline": "tainted",
+        "pristine_historical_holdout": False,
+        "parent_provenance": PARENT_PROVENANCE,
+        "drawdown_definition": "max_dd_usd is close-to-close mark-to-market equity peak to trough. Cash drawdown is separate. A value above the initial 100 is a giveback from a higher peak.",
         "gate_replay": "not_run_fields_insufficient",
         "initial_usd": initial,
         "results": results,
         "limitations": [
             "2021-2025 bars are missing. This is not a 2021-now result.",
+            "No pristine temporal holdout exists here for the current parents. Their selection window ends 2026-11-04.",
             "Price and setup only. Kronos certainty and quote age are not in the gate log.",
             "Slippage 0, 0.30, and 0.60 are assumptions. 0.30 is the configured demo assumption, not a measured bound.",
             "Live-feed tail has no spread and cannot open.",
@@ -621,6 +869,222 @@ def annotate_saved(out_dir, bars):
             meta["by_regime"] = by_reg
             json.dump(meta, open(path, "w"), indent=2)
 
+def replay_trades(bars, trades, initial):
+    """Independent cash and close-equity ledger for an already saved book.
+
+    Same order as simulate: exits on a bar are booked before the close mark, and a same-bar
+    round trip is not marked. This does not regenerate signals and does not change fills.
+    """
+    comm = commission_per_side_usd(LOT, COMMISSION_PER_LOT_SIDE)
+    by_entry, by_exit = {}, {}
+    for i, tr in enumerate(trades):
+        by_entry.setdefault(tr["entry_ts"], []).append(i)
+        by_exit.setdefault(tr["exit_ts"], []).append(i)
+    cash = float(initial)
+    positions = {}
+    cash_peak = cash_trough = float(initial)
+    mtm_peak = mtm_trough = float(initial)
+    dd_cash = dd_mtm = 0.0
+    max_open = 0
+    max_risk = 0.0
+    max_risk_pct = None
+    max_notional = 0.0
+    neg_eq = 0
+    neg_cash = 0
+
+    def note_cash():
+        nonlocal cash_peak, cash_trough, dd_cash, neg_cash
+        if cash > cash_peak:
+            cash_peak = cash
+        if cash < cash_trough:
+            cash_trough = cash
+        dd_cash = max(dd_cash, cash_peak - cash)
+        if cash <= 0:
+            neg_cash += 1
+
+    for b in bars:
+        ts = b["t"]
+        # Entries were appended at the end of the signal bar, so they are open at the start of this bar.
+        for i in by_entry.get(ts, []):
+            tr = dict(trades[i])
+            raw_sp = b.get("spread")
+            tr["_sp"] = raw_sp if raw_sp is not None and 0 <= raw_sp <= SPREAD_UNUSABLE else 0.0
+            cash = round(cash - comm, 2)
+            positions[i] = tr
+        for i in list(by_exit.get(ts, [])):
+            if i not in positions:
+                continue
+            tr = trades[i]
+            direction = 1 if tr["side"] == "buy" else -1
+            price = direction * (tr["exit_px"] - tr["entry"]) * POINT_VALUE
+            cash = round(cash + price - comm, 2)
+            del positions[i]
+        note_cash()
+        eq = cash
+        risk = 0.0
+        notional = 0.0
+        for i, tr in positions.items():
+            # Match the published mark: the bar's own spread, including a bad print if one was used.
+            raw_sp = b.get("spread")
+            sp = raw_sp if raw_sp is not None else (tr.get("_sp") or 0.0)
+            px = b["c"] if tr["side"] == "buy" else b["c"] + sp
+            direction = 1 if tr["side"] == "buy" else -1
+            eq += direction * (px - tr["entry"]) * POINT_VALUE - comm
+            risk += tr["risk_usd"]
+            notional += abs(px) * POINT_VALUE
+        if eq > mtm_peak:
+            mtm_peak = eq
+        if eq < mtm_trough:
+            mtm_trough = eq
+        dd_mtm = max(dd_mtm, mtm_peak - eq)
+        if eq <= 0:
+            neg_eq += 1
+        max_open = max(max_open, len(positions))
+        if risk > max_risk:
+            max_risk = risk
+            max_risk_pct = (100.0 * risk / cash) if cash > 0 else None
+        max_notional = max(max_notional, notional)
+    identity_breaks = 0
+    for tr in trades:
+        direction = 1 if tr["side"] == "buy" else -1
+        price = direction * (tr["exit_px"] - tr["entry"]) * POINT_VALUE
+        if abs(round(price - tr["commission_usd"], 2) - tr["pnl_usd"]) > 0.02:
+            identity_breaks += 1
+    gaps = []
+    for tr in trades:
+        if tr["exit_reason"] != "sl_gap":
+            continue
+        beyond = round(-(tr["pnl_usd"]) - tr["risk_usd"] - tr["commission_usd"], 2)
+        if beyond > 0.02:
+            gaps.append({
+                "strategy": tr["strategy"], "side": tr["side"], "risk_usd": tr["risk_usd"],
+                "pnl_usd": tr["pnl_usd"], "beyond_planned_plus_commission_usd": beyond,
+                "entry": tr["entry"], "sl": tr["sl"], "exit_px": tr["exit_px"],
+            })
+    return {
+        "final_cash_usd": round(cash, 2),
+        "cash_peak_usd": round(cash_peak, 2),
+        "cash_trough_usd": round(cash_trough, 2),
+        "max_dd_cash_usd": round(dd_cash, 2),
+        "mtm_peak_usd": round(mtm_peak, 2),
+        "mtm_trough_usd": round(mtm_trough, 2),
+        "max_dd_mtm_usd": round(dd_mtm, 2),
+        "still_open": len(positions),
+        "cash_nonpositive_events": neg_cash,
+        "mtm_nonpositive_bars": neg_eq,
+        "max_open_positions": max_open,
+        "max_open_planned_risk_usd": round(max_risk, 2),
+        "max_open_planned_risk_pct_of_cash": None if max_risk_pct is None else round(max_risk_pct, 4),
+        "max_open_notional_usd": round(max_notional, 2),
+        "fill_identity_breaks": identity_breaks,
+        "gap_loss_beyond_planned": gaps,
+    }
+
+def audit_saved_baseline(out_dir, bars_path, live_path=None):
+    """Cross-check published books. Writes LEDGER_AUDIT.json and labels the tainted baseline."""
+    primary = load_csv(bars_path)
+    live = load_csv(live_path) if live_path else []
+    merged, _report = merge_bars(primary, live)
+    outlier = [b for b in merged if b.get("spread") is not None and b["spread"] > SPREAD_UNUSABLE]
+    books = []
+    violations = []
+    for root, _dirs, files in os.walk(out_dir):
+        if "summary.json" not in files or "trades.jsonl" not in files:
+            continue
+        meta = json.load(open(os.path.join(root, "summary.json")))
+        trades = [json.loads(x) for x in open(os.path.join(root, "trades.jsonl")) if x.strip()]
+        replay = replay_trades(merged, trades, meta["summary"]["initial_usd"])
+        pub_final = meta["summary"]["final_balance_usd"]
+        pub_dd = meta["summary"]["max_dd_usd"]
+        cash_ok = abs(replay["final_cash_usd"] - pub_final) <= 0.02 and replay["still_open"] == 0 and replay["fill_identity_breaks"] == 0
+        dd_delta = round(pub_dd - replay["max_dd_mtm_usd"], 2)
+        status = "cash_and_mtm_explained"
+        if not cash_ok:
+            status = "invariant_violation"
+            violations.append(os.path.relpath(root, out_dir))
+        elif abs(dd_delta) > 0.05:
+            status = "mtm_dd_disagrees"
+            violations.append(os.path.relpath(root, out_dir))
+        touch = 0
+        for b in outlier:
+            touch += sum(1 for t in trades if t["entry_ts"] <= b["t"] <= t["exit_ts"])
+        row = {
+            "book": os.path.relpath(root, out_dir),
+            "status": status,
+            "published_final_usd": pub_final,
+            "published_max_dd_usd": pub_dd,
+            "replay_minus_published_mtm_dd_usd": dd_delta,
+            "dd_exceeds_initial": pub_dd > meta["summary"]["initial_usd"],
+            "dd_exceeds_initial_because_replay_peak_above_initial": replay["mtm_peak_usd"] > meta["summary"]["initial_usd"] and replay["max_dd_mtm_usd"] > meta["summary"]["initial_usd"],
+            "spread_outlier_bars_while_open": touch,
+            **replay,
+        }
+        books.append(row)
+        meta["segment"] = "tainted_2026_parent_baseline"
+        meta["pristine_holdout"] = False
+        meta["parent_provenance"] = PARENT_PROVENANCE
+        meta["drawdown_interpretation"] = {
+            "published_max_dd_usd_is": "close_mark_to_market_equity_peak_to_trough",
+            "replay_max_dd_cash_usd": replay["max_dd_cash_usd"],
+            "replay_max_dd_mtm_usd": replay["max_dd_mtm_usd"],
+            "replay_cash_peak_usd": replay["cash_peak_usd"],
+            "replay_mtm_peak_usd": replay["mtm_peak_usd"],
+            "replay_cash_trough_usd": replay["cash_trough_usd"],
+            "replay_mtm_trough_usd": replay["mtm_trough_usd"],
+            "exceeds_initial_because_peak_above_initial": row["dd_exceeds_initial_because_replay_peak_above_initial"],
+            "cash_nonpositive": replay["cash_nonpositive_events"] > 0,
+            "mtm_nonpositive": replay["mtm_nonpositive_bars"] > 0,
+            "margin_rate": None,
+            "max_open_notional_usd": replay["max_open_notional_usd"],
+            "max_open_planned_risk_usd": replay["max_open_planned_risk_usd"],
+        }
+        meta["cost_interpretation"] = {
+            "published_costs_usd_is": "commission_plus_both_fill_slippage_already_inside_pnl",
+            "do_not_subtract_costs_usd_from_net_pnl": True,
+            "level_exit_cash_slippage_sides": 1,
+            "gap_or_mark_cash_slippage_sides": 2,
+            "spread": "embedded in the bid/ask fills, not a second debit",
+        }
+        json.dump(meta, open(os.path.join(root, "summary.json"), "w"), indent=2)
+    index_path = os.path.join(out_dir, "INDEX.json")
+    if os.path.exists(index_path):
+        index = json.load(open(index_path))
+        index["holdout_rule"] = "2025-07-01 UTC onward is withheld from new research only. This 2026 sample is a tainted baseline for parents selected through 2026-11-04. It is not an unseen holdout."
+        index["parent_baseline"] = "tainted"
+        index["pristine_historical_holdout"] = False
+        index["parent_provenance"] = PARENT_PROVENANCE
+        index["drawdown_definition"] = "published max_dd_usd is close-to-close mark-to-market equity peak to trough. Cash drawdown is in LEDGER_AUDIT.json. A value above the initial 100 is a giveback from a higher peak."
+        index["ledger_audit"] = "LEDGER_AUDIT.json"
+        index["full_period_2021_2026"] = False
+        notes = index.get("limitations", [])
+        extra = "No pristine temporal holdout exists here for the current parents. Their selection window ends 2026-11-04."
+        if extra not in notes:
+            notes.insert(1, extra)
+        index["limitations"] = notes
+        json.dump(index, open(index_path, "w"), indent=2)
+    audit = {
+        "kind": "ledger_audit",
+        "full_period_2021_2026": False,
+        "historical_performance_claim": False,
+        "evolution_eligible": False,
+        "parent_baseline": "tainted",
+        "pristine_historical_holdout": False,
+        "parent_provenance": PARENT_PROVENANCE,
+        "spread_outlier_bars": [{"t": b["t"], "iso": iso(b["t"]), "spread": b["spread"]} for b in outlier],
+        "cost_model": {
+            "spread": "embedded in fills (long pays the open spread on entry; short stops are on the ask). Not subtracted again.",
+            "commission": "0.04 USD per side, 0.08 round trip, deducted once at entry and once at exit.",
+            "slippage": "applied to each fill. On an SL or TP the bracket is built from the slipped entry, so the cash gap versus a zero-slip bracket is one side. On a gap or end-of-data mark both sides remain. Published costs_usd adds both-fill slippage on top of a label even though that slippage is already inside pnl. Do not subtract costs_usd from net_pnl.",
+            "dollar_cap_claimed": False,
+        },
+        "margin_model": "unverified_no_broker_margin_rate",
+        "books": sorted(books, key=lambda r: r["book"]),
+        "violations": violations,
+        "books_checked": len(books),
+    }
+    json.dump(audit, open(os.path.join(out_dir, "LEDGER_AUDIT.json"), "w"), indent=2)
+    return audit
+
 def _count(rows):
     out = {}
     for r in rows:
@@ -631,6 +1095,7 @@ def _count(rows):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--self-test", action="store_true")
+    ap.add_argument("--ledger-audit", action="store_true")
     ap.add_argument("--coverage-only", action="store_true")
     ap.add_argument("--provisional-2026", action="store_true")
     ap.add_argument("--bars")
@@ -646,6 +1111,18 @@ def main():
     if args.self_test:
         self_test()
         return
+    if args.ledger_audit:
+        if not args.bars or not args.out:
+            raise SystemExit("ledger audit needs --bars and --out")
+        audit = audit_saved_baseline(args.out, args.bars, args.livefeed)
+        print(json.dumps({
+            "wrote": os.path.join(args.out, "LEDGER_AUDIT.json"),
+            "books": audit["books_checked"],
+            "violations": audit["violations"],
+            "full_period_2021_2026": False,
+            "pristine_historical_holdout": False,
+        }))
+        raise SystemExit(1 if audit["violations"] else 0)
     if not args.bars:
         print(json.dumps({"status": "awaiting_dataset", "full_period": False, "performance": None, "historical_performance": False}))
         raise SystemExit(2)

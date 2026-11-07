@@ -5,7 +5,7 @@
   "evolution_eligible": false,
   "provider": "icdemo_m5_hc_utc_converted_2026",
   "pre_2026_provider": "absent_other_worker",
-  "holdout_rule": "2025-07-01 UTC onward is holdout. This 2026 sample sits inside it and is a frozen baseline only.",
+  "holdout_rule": "2025-07-01 UTC onward is withheld from new research only. This 2026 sample is a tainted baseline for parents selected through 2026-11-04. It is not an unseen holdout.",
   "gate_replay": "not_run_fields_insufficient",
   "initial_usd": 100.0,
   "results": [
@@ -324,10 +324,23 @@
   ],
   "limitations": [
     "2021-2025 bars are missing. This is not a 2021-now result.",
+    "No pristine temporal holdout exists here for the current parents. Their selection window ends 2026-11-04.",
     "Price and setup only. Kronos certainty and quote age are not in the gate log.",
     "Slippage 0, 0.30, and 0.60 are assumptions. 0.30 is the configured demo assumption, not a measured bound.",
     "Live-feed tail has no spread and cannot open.",
     "100 USD keeps the 25% stop ceiling. Rejections are reported, not relaxed.",
     "Bee1 is backtest-only and stays off on the running demo."
-  ]
+  ],
+  "parent_baseline": "tainted",
+  "pristine_historical_holdout": false,
+  "parent_provenance": {
+    "created": "2026-11-04 ICT",
+    "selection_activity": "backtests run 2026-10-30 through 2026-11-04",
+    "selection_design": "40-day train and 10-day OOS ending 2026-11-04",
+    "pristine_holdout": false,
+    "new_research_withheld_from": "2025-07-01 UTC",
+    "note": "The withheld window applies to new research that has not seen those bars. It is not an unseen holdout for these parents."
+  },
+  "drawdown_definition": "published max_dd_usd is close-to-close mark-to-market equity peak to trough. Cash drawdown is in LEDGER_AUDIT.json. A value above the initial 100 is a giveback from a higher peak.",
+  "ledger_audit": "LEDGER_AUDIT.json"
 }
